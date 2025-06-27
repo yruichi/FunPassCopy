@@ -8,6 +8,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkcalendar import DateEntry
 import pandas as pd
 from shared import create_database, BaseWindow
+import smtplib
+from email.message import EmailMessage
 
 # database setup
 def create_database():
@@ -132,9 +134,9 @@ class EmployeeDashboard:
         sidebar.grid(row=0, column=0, sticky="ns")
         sidebar.grid_propagate(False)
         try:
-            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_path = "FunPass__1_-removebg-preview.png"
             logo_img = Image.open(logo_path)
-            logo_width = 220
+            logo_width = 200
             aspect_ratio = logo_img.height / logo_img.width
             logo_height = int(logo_width * aspect_ratio)
             logo_img = logo_img.resize((logo_width, logo_height))
@@ -165,47 +167,120 @@ class EmployeeDashboard:
 
     def show_dashboard(self):
         self.clear_content()
-        dashboard_title = tk.Label(self.content_frame, text="Dashboard", font=('Arial', 18, 'bold'), bg='white', anchor='w')
-        dashboard_title.pack(pady=(10, 0), padx=20, anchor='w')
-        dashboard_subtitle = tk.Label(self.content_frame, text="Your Sales and Ticket Overview", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        dashboard_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+        # Title: Dashboard, styled to match AdminDashboard (font size 20, bold, maroon, with padding)
+        dashboard_title = tk.Label(self.content_frame, text="Dashboard", font=('Segoe UI', 20, 'bold'), bg='white', anchor='w', fg='#22223B')
+        dashboard_title.pack(pady=(20, 0), padx=30, anchor='w')
+        # Subtitle: font size 15, gray, with left padding
+        dashboard_subtitle = tk.Label(self.content_frame, text="Your Sales and Ticket Overview", font=('Segoe UI', 15), fg='#6b7280', bg='white', anchor='w')
+        dashboard_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
 
-        # Top bar with date and time
-        top_bar = tk.Frame(self.content_frame, bg='white')
-        top_bar.pack(fill=tk.X, pady=10)
-        time_frame = tk.Frame(top_bar, bg='white', relief='solid', bd=1)
-        time_frame.pack(side=tk.RIGHT, padx=20, pady=5)
-        self.date_label = tk.Label(time_frame, font=('Arial', 12, 'bold'), bg='white')
-        self.date_label.pack(side=tk.LEFT, padx=10)
-        self.time_label = tk.Label(time_frame, font=('Arial', 12), bg='white')
-        self.time_label.pack(side=tk.LEFT, padx=10)
+        # Top bar with date and time, inside a modern card (white background, rounded look)
+        top_bar_card = tk.Frame(self.content_frame, bg='#FFFFFF', bd=0, highlightthickness=0)
+        top_bar_card.pack(fill=tk.X, padx=30, pady=(20, 0))
+        # Time/date on the right
+        time_frame = tk.Frame(top_bar_card, bg='#FFFFFF')
+        time_frame.pack(side=tk.RIGHT, padx=25, pady=20)
+        # Date label: font size 15, gray
+        self.date_label = tk.Label(time_frame, font=('Segoe UI', 15, 'normal'), bg='#FFFFFF', fg='#6b7280')
+        self.date_label.pack(side=tk.TOP, anchor='e')
+        # Time label: font size 15, bold, maroon
+        self.time_label = tk.Label(time_frame, font=('Segoe UI', 15, 'bold'), bg='#FFFFFF', fg='#22223B')
+        self.time_label.pack(side=tk.TOP, anchor='e', pady=0)
+        # Status label: green, left side
+        status_label = tk.Label(top_bar_card, text="🟢 System Online", font=('Segoe UI', 15, 'normal'), bg='#FFFFFF', fg='#4CAF50')
+        status_label.pack(side=tk.LEFT, padx=20, pady=20, anchor='w')
         self.update_time()
 
-        # Stats
-        stats_frame = tk.LabelFrame(self.content_frame, text="Overview", bg='white', font=('Arial', 12, 'bold'))
-        stats_frame.pack(fill=tk.X, pady=10, padx=5)
+        # Overview Card: white background, rounded look, modern padding
+        overview_card = tk.Frame(self.content_frame, bg='#FFFFFF', bd=0, highlightthickness=0)
+        overview_card.pack(fill=tk.X, padx=30, pady=20)
+        # Overview title: font size 15, bold
+        tk.Label(overview_card, text='Overview', font=('Segoe UI', 15, 'bold'), bg='#FFFFFF', fg='#22223B', anchor='w').pack(anchor='w', pady=(10, 0), padx=20)
+        # Stats grid: 2 columns, modern padding
+        stats_grid = tk.Frame(overview_card, bg='#FFFFFF')
+        stats_grid.pack(fill='x', padx=20, pady=(10, 10))
         for i in range(2):
-            stats_frame.grid_columnconfigure(i, weight=1)
+            stats_grid.grid_columnconfigure(i, weight=1)
 
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        # Total sales for this employee
-        cursor.execute('SELECT SUM(amount) FROM customers WHERE employee_id=?', (self.employee_id,))
+        
+        # Total all-time sales for this employee
+        cursor.execute('''
+            SELECT IFNULL(SUM(amount), 0)
+            FROM customers
+            WHERE employee_id=?
+        ''', (self.employee_id,))
         total_sales = cursor.fetchone()[0] or 0
+
+        cursor.execute('''
+            SELECT IFNULL(SUM(amount), 0)
+            FROM cancellations
+            WHERE status='Approved'
+            AND ticket_id IN (
+                SELECT ticket_id FROM customers WHERE employee_id=?
+            )
+        ''', (self.employee_id,))
+        cancelled_sales = cursor.fetchone()[0] or 0
+
+        net_sales = total_sales - cancelled_sales
+        
+        # Total this month's sales for this employee
+        cursor.execute('''
+            SELECT SUM(amount) 
+            FROM customers 
+            WHERE employee_id=? 
+            AND strftime('%Y-%m', purchased_date) = strftime('%Y-%m', 'now')
+        ''', (self.employee_id,))
+        monthly_sales = cursor.fetchone()[0] or 0
+        
         # Total tickets sold for this employee
         cursor.execute('SELECT SUM(quantity) FROM customers WHERE employee_id=?', (self.employee_id,))
         total_tickets = cursor.fetchone()[0] or 0
+        
+        # Get most popular passes (all-time)
+        cursor.execute('''
+            SELECT 
+                pass_type, 
+                SUM(quantity) as total_qty
+            FROM customers 
+            WHERE employee_id=? 
+            GROUP BY pass_type
+            ORDER BY total_qty DESC
+        ''', (self.employee_id,))
+        popular_passes = cursor.fetchall()
+        
+        if popular_passes and len(popular_passes) > 0:
+            # Get the top pass
+            top_pass = popular_passes[0]
+            popular_ticket_text = f"{top_pass[0]}\n({top_pass[1]} sold)"
+        else:
+            popular_ticket_text = "No passes\nsold yet"
+        
         conn.close()
 
         stats_data = [
             ("Total Sales", f"₱{total_sales:,.2f}", "#2196F3"),
-            ("Total Tickets Sold", f"{int(total_tickets)}", "#FF9800")
+            ("This Month's Sales", f"₱{monthly_sales:,.2f}", "#009688"),
+            ("Total Tickets Sold", f"{int(total_tickets) if total_tickets else 0}", "#FF9800"),
+            ("Most Popular Pass", popular_ticket_text, "#673AB7")
         ]
+
         for idx, (label, value, color) in enumerate(stats_data):
-            stat_card = tk.Frame(stats_frame, bg='white', relief='solid', bd=1)
+            stat_card = tk.Frame(stats_grid, bg='white', relief='solid', bd=1)
             stat_card.grid(row=idx//2, column=idx%2, padx=10, pady=5, sticky='ew')
-            tk.Label(stat_card, text=label, font=('Arial', 10), bg='white').pack(pady=2)
-            tk.Label(stat_card, text=value, font=('Arial', 16, 'bold'), fg=color, bg='white').pack(pady=2)
+            
+            tk.Label(stat_card, text=label, font=('Arial', 10), 
+                    bg='white').pack(pady=2)
+            if '\n' in str(value):  # For popular ticket that has two lines
+                value1, value2 = value.split('\n')
+                tk.Label(stat_card, text=value1, font=('Arial', 14, 'bold'), 
+                        fg=color, bg='white').pack(pady=(2,0))
+                tk.Label(stat_card, text=value2, font=('Arial', 12), 
+                        fg=color, bg='white').pack(pady=(0,2))
+            else:
+                tk.Label(stat_card, text=value, font=('Arial', 16, 'bold'), 
+                        fg=color, bg='white').pack(pady=2)
 
         # Styled Total Availability
         availability_frame = tk.LabelFrame(self.content_frame, text="Total Availability", bg='white', font=('Arial', 12, 'bold'))
@@ -325,9 +400,9 @@ class EmployeeDashboard:
         try:
             current = datetime.now()
             current_time = current.strftime("%Y-%m-%d %H:%M:%S")
-            if hasattr(self, 'time_label'):
+            if hasattr(self, 'time_label') and self.time_label.winfo_exists():
                 self.time_label.config(text=current_time)
-            if hasattr(self, 'date_label'):
+            if hasattr(self, 'date_label') and self.date_label.winfo_exists():
                 self.date_label.config(text=current.strftime("%A, %B %d, %Y"))
             self.root.after(1000, self.update_time)
         except Exception as e:
@@ -335,35 +410,21 @@ class EmployeeDashboard:
 
     def show_rides(self):
         self.clear_content()
-        # to create main frame for rides
-        rides_frame = tk.Frame(self.content_frame, bg='white')
-        rides_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # Title: Pass Types and Inclusions, styled to match AdminDashboard (font size 20, bold)
+        rides_title = tk.Label(self.content_frame, text="Pass Types and Inclusions", font=('Segoe UI', 20, 'bold'), bg='white', anchor='w', fg='black')
+        rides_title.pack(pady=(20, 0), padx=30, anchor='w')
+        # Subtitle: font size 15, gray
+        rides_subtitle = tk.Label(self.content_frame, text="View Rides Descriptions and Inclusions", font=('Segoe UI', 15), fg='#6b7280', bg='white', anchor='w')
+        rides_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
 
-        # to create title frame
-        header_frame = tk.Frame(rides_frame, bg='white')
-        header_frame.pack(fill=tk.X, pady=(0, 0))
-
-        # to create title
-        title = tk.Label(header_frame, text="Pass Types and Inclusions", font=('Arial', 16, 'bold'), bg='white', anchor='w')
-        title.pack(anchor='w', padx=0, pady=(0, 0))
-        # Subtitle styled like Customers
-        subtitle = tk.Label(header_frame, text="View Rides Descriptions and Inclusions", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        subtitle.pack(anchor='w', padx=0, pady=(0, 10))
-
-        # to create a canvas with scrollbar
-        canvas = tk.Canvas(rides_frame, bg='white')
-        scrollbar = ttk.Scrollbar(rides_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='white')
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        # to define pass types and their descriptions
+        # Modern grid of pass type cards, styled like AdminDashboard
+        grid_frame = tk.Frame(self.content_frame, bg='white')
+        grid_frame.pack(pady=(10, 10), padx=0, fill='both', expand=True)
+        card_w, card_h, card_r = 290, 270, 35  # Card size and radius
+        card_bg = 'white'
+        card_fg = 'black'
+        card_padx = 20
+        card_pady = 20
         pass_descriptions = [
             ("Express Pass", """• Priority access to all rides and attractions\n• Skip regular lines\n• Access to exclusive Express Pass lanes\n• Unlimited rides all day\n• Special discounts at food stalls\n• Free locker usage\n• Free parking\n• Exclusive souvenir"""),
             ("Junior Pass", """• Access to all kid-friendly rides\n• Special access to children's play areas\n• Meet and greet with mascots\n• Free snack pack\n• Age requirement: 4-12 years old\n• Free kid's meal\n• Free face painting\n• Access to kids' workshops"""),
@@ -372,72 +433,102 @@ class EmployeeDashboard:
             ("Senior Citizen Pass", """• Access to all rides and attractions\n• Priority queuing at selected rides\n• Special assistance available\n• Senior citizen ID required\n• Includes free refreshments\n• Access to senior's lounge\n• Free health monitoring\n• Special meal options"""),
             ("PWD Pass", """• Access to all rides and attractions\n• Priority queuing at all rides\n• Special assistance available\n• PWD ID required\n• Companion gets 50% discount\n• Free wheelchair service\n• Dedicated assistance staff\n• Special facilities access""")
         ]
+        for idx, (pass_type, description) in enumerate(pass_descriptions):
+            row = idx // 3
+            col = idx % 3
+            # Canvas for rounded card
+            card_canvas = tk.Canvas(grid_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
+            card_canvas.grid(row=row, column=col, padx=card_padx, pady=card_pady, sticky='n')
+            # Draw rounded rectangle for card
+            rect_id = self.draw_rounded_rect(card_canvas, 0, 0, card_w, card_h, card_r, fill=card_bg, outline='#E0E0E0', width=2)
+            card_frame = tk.Frame(card_canvas, bg=card_bg)
+            card_canvas.create_window((card_w//2, card_h//2), window=card_frame, anchor='center')
+            # Pass type title: font size 15, bold, maroon
+            tk.Label(card_frame, text=pass_type, font=('Segoe UI', 15, 'bold'), bg=card_bg, fg='#9A4E62').pack(anchor='w', padx=14, pady=(10, 0))
+            # Description: font size 10, gray
+            tk.Label(card_frame, text=description, font=('Segoe UI', 10), bg=card_bg, fg=card_fg, justify=tk.LEFT, anchor='w', wraplength=card_w-28).pack(anchor='w', padx=15, pady=(0, 15))
+            # Hover effect for glowing outline
+            def on_enter(event, canvas=card_canvas, rid=rect_id):
+                canvas.itemconfig(rid, outline='#FFD700', width=5)
+            def on_leave(event, canvas=card_canvas, rid=rect_id):
+                canvas.itemconfig(rid, outline='#E0E0E0', width=2)
+            card_canvas.bind('<Enter>', on_enter)
+            card_canvas.bind('<Leave>', on_leave)
 
-        for pass_type, description in pass_descriptions:
-            # to create frame for each pass type
-            pass_frame = tk.Frame(scrollable_frame, bg='white', bd=1, relief='solid')
-            pass_frame.pack(fill=tk.X, pady=5, padx=10)
-
-            # to create header frame with pass type
-            header = tk.Frame(pass_frame, bg='#f0f0f0')
-            header.pack(fill=tk.X)
-
-            # to create pass type header
-            tk.Label(header, text=pass_type, font=('Arial', 12, 'bold'), 
-                    bg='#f0f0f0', padx=10, pady=5).pack(anchor='w')
-
-            # description with bullet points
-            desc_label = tk.Label(pass_frame, text=description, font=('Arial', 11),
-                               bg='white', justify=tk.LEFT, anchor='w', wraplength=600)
-            desc_label.pack(fill=tk.X, padx=20, pady=10)
-
-        # to pack canvas and scrollbar
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    # Utility for rounded rect (copy from main.py)
+    def draw_rounded_rect(self, canvas, x1, y1, x2, y2, r, **kwargs):
+        points = [
+            x1+r, y1,
+            x2-r, y1,
+            x2, y1,
+            x2, y1+r,
+            x2, y2-r,
+            x2, y2,
+            x2-r, y2,
+            x1+r, y2,
+            x1, y2,
+            x1, y2-r,
+            x1, y1+r,
+            x1, y1
+        ]
+        return canvas.create_polygon(points, smooth=True, **kwargs)
 
     def show_customers(self):
         self.clear_content()
-        customer_title = tk.Label(self.content_frame, text="Customers", font=('Arial', 16, 'bold'), bg='white', anchor='w')
-        customer_title.pack(pady=(10, 0), padx=20, anchor='w')
-        customer_subtitle = tk.Label(self.content_frame, text="View, Add, Edit, and Delete Customers", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        customer_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+        # --- Title and subtitle, styled to match AdminDashboard ---
+        customer_title = tk.Label(self.content_frame, text="Customers", font=('Segoe UI', 20, 'bold'), bg='white', anchor='w')
+        customer_title.pack(pady=(20, 0), padx=30, anchor='w')
+        customer_subtitle = tk.Label(self.content_frame, text="View, Add, Edit, and Delete Customers", font=('Segoe UI', 15), fg='#6b7280', bg='white', anchor='w')
+        customer_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
 
+        # --- Controls frame with themed background ---
         controls_frame = tk.Frame(self.content_frame, bg='white')
-        controls_frame.pack(fill=tk.X, pady=10)
-
+        controls_frame.pack(fill=tk.X, pady=10, padx=30)
         search_frame = tk.Frame(controls_frame, bg='white')
         search_frame.pack(side=tk.LEFT)
         tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
-        search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=('Arial', 11), width=30)
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=('Segoe UI', 11), width=30)
         search_entry.pack(side=tk.LEFT, padx=5)
-
-        # Sort frame next to search
         sort_frame = tk.Frame(controls_frame, bg='white')
         sort_frame.pack(side=tk.LEFT, padx=10)
         tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], width=15)
+        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], width=15, font=('Segoe UI', 10))
         sort_options.pack(side=tk.LEFT, padx=5)
         sort_options.set("Name (A-Z)")
         sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
-
-        # Buttons for add, edit, delete
         btn_frame = tk.Frame(controls_frame, bg='white')
         btn_frame.pack(side=tk.RIGHT, padx=10)
-        tk.Button(btn_frame, text="Add Customer", command=self.add_customer_dialog, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Edit Customer", command=self.edit_customer_dialog, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Delete Customer", command=self.delete_customer, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Add Customer", command=self.add_customer_dialog, bg='#4CAF50', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Edit Customer", command=self.edit_customer_dialog, bg='#2196F3', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Delete Customer", command=self.delete_customer, bg='#f44336', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="View Receipt", command=self.view_receipt, bg="#D0A011", fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
 
+        # --- Table in a modern rounded card ---
+        card_w, card_h, card_r = 1000, 400, 35
+        table_card_canvas = tk.Canvas(self.content_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
+        table_card_canvas.pack(padx=30, pady=(10, 0))
+        self.draw_rounded_rect(table_card_canvas, 0, 0, card_w, card_h, card_r, fill='white', outline='')
+        table_inner = tk.Frame(table_card_canvas, bg='white')
+        table_card_canvas.create_window((card_w//2, card_h//2), window=table_inner, anchor='center', width=card_w-30, height=card_h-30)
         columns = ('Ticket ID', 'Name', 'Email', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Pass Type')
-        self.customers_tree = ttk.Treeview(self.content_frame, columns=columns, show='headings')
+        self.customers_tree = ttk.Treeview(table_inner, columns=columns, show='headings')
         for col in columns:
             self.customers_tree.heading(col, text=col)
             self.customers_tree.column(col, width=120)
         self.customers_tree.pack(fill=tk.BOTH, expand=True, pady=10)
-        scrollbar = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
+        scrollbar = ttk.Scrollbar(table_inner, orient=tk.VERTICAL, command=self.customers_tree.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.customers_tree.configure(yscrollcommand=scrollbar.set)
         sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
         self.load_customers_data()
+        def clear_customers_selection(event):
+            self.customers_tree.selection_remove(self.customers_tree.selection())
+        self.customers_tree.bind("<FocusOut>", clear_customers_selection)
+        def clear_selection_on_click(event):
+            region = self.customers_tree.identify("region", event.x, event.y)
+            if region == "nothing":
+                self.customers_tree.selection_remove(self.customers_tree.selection())
+        self.customers_tree.bind("<Button-1>", clear_selection_on_click, add="+")
 
     def search_customers(self, *args):
         search_text = self.search_var.get().lower()
@@ -607,8 +698,11 @@ class EmployeeDashboard:
         
         # Pass Type (move this before quantity)
         tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
-        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11))
+        pass_types = self.get_pass_types()
+        pass_type_combo = ttk.Combobox(main_frame, values=pass_types, font=('Arial', 11), state="readonly")
         pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        if pass_types:
+            pass_type_combo.set(pass_types[0])  # Set default to "Express Pass"
 
         # Quantity
         tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
@@ -655,8 +749,8 @@ class EmployeeDashboard:
             amount = amount_var.get().replace('₱', '').replace(',', '')
             booked_date = booked_date_entry.get()
 
-            if not (name and email and quantity and pass_type and amount and booked_date):
-                messagebox.showerror("Error", "All fields are required!")
+            if not (name and quantity and pass_type and amount and booked_date):
+                messagebox.showerror("Error", "Name, Quantity, Pass Type, Amount, and Booked Date are required!")
                 return
 
             try:
@@ -826,8 +920,8 @@ class EmployeeDashboard:
                 return
 
             # Validate fields
-            if not all([name, email, quantity, amount, pass_type, booked_date, purchased_date]):
-                messagebox.showerror("Error", "All fields are required!")
+            if not all([name, quantity, amount, pass_type, booked_date, purchased_date]):
+                messagebox.showerror("Error", "Name, Quantity, Amount, Pass Type, Booked Date, and Purchased Date are required!")
                 return
 
             try:
@@ -880,6 +974,16 @@ class EmployeeDashboard:
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred: {str(e)}")
 
+    def view_receipt(self):
+        selected = self.customers_tree.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select a customer to view the receipt.")
+            return
+        values = self.customers_tree.item(selected[0])['values']
+        if len(values) >= 8:
+            ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type = values[:8]
+            self.print_ticket(ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type)
+
     def generate_ticket_id(self):
         import random, string
         return 'F' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
@@ -901,32 +1005,78 @@ class EmployeeDashboard:
         return float(row[0]) if row else 0.0
 
     def print_ticket(self, ticket_id, name, email, quantity, amount, booked_date, purchased_date, pass_type):
+        # Prepare ticket content for email
+        ticket_content = f"""FunPass: Amusement Park Ticketing System
+
+FunPass Booking Receipt
+
+Booking Details
+---------------------
+Ticket ID: {ticket_id}
+Customer Name: {name}
+Email: {email}
+Ticket Type: {pass_type}
+Quantity: {quantity}
+Unit Price: ₱{float(amount)/int(quantity):,.2f} 
+Total Amount: ₱{float(amount):,.2f}
+Booked Date: {booked_date}
+Purchased Date: {purchased_date}
+
+Terms & Conditions:
+• Tickets are valid only for the booked date
+• No refunds for unused tickets
+• Please present this receipt at the entrance
+• Subject to park rules and regulations
+"""
+        # Send email if email is provided and looks valid
+        if email and "@" in email:
+            self.send_ticket_via_email(email, ticket_content)
+
+        # Print window code (existing)
         print_win = tk.Toplevel(self.root)
         print_win.title("Booking Receipt")
-        print_win.geometry("420x650")
+        print_win.geometry("400x600")
         print_win.configure(bg='white')
-        # Add logo at the top
+        print_win.transient(self.root)
+        print_win.lift()
+
+        # Center the window on the screen
+        print_win.update_idletasks()
+        w = 400
+        h = 600
+        x = (print_win.winfo_screenwidth() // 2) - (w // 2)
+        y = (print_win.winfo_screenheight() // 2) - (h // 2)
+        print_win.geometry(f"{w}x{h}+{x}+{y}")
+
+        # Main frame for centering
+        main_frame = tk.Frame(print_win, bg='white')
+        main_frame.pack(expand=True, fill=tk.BOTH)
+
+        # Logo
         try:
-            logo_path = "C:/Users/MicaellaEliab/Downloads/FunPassProjectA/FunPass__1_-removebg-preview.png"
+            logo_path = "FunPass__1_-removebg-preview.png"
             logo_img = Image.open(logo_path)
-            logo_width = 100
+            logo_width = 90
             aspect_ratio = logo_img.height / logo_img.width
             logo_height = int(logo_width * aspect_ratio)
             logo_img = logo_img.resize((logo_width, logo_height))
-            logo = ImageTk.PhotoImage(logo_img)
-            logo_label = tk.Label(print_win, image=logo, bg='white')
-            logo_label.image = logo
-            logo_label.pack(pady=(20, 5))
-        except Exception as e:
-            tk.Label(print_win, text="FunPass", font=('Arial', 18, 'bold'), bg='white', fg='#4CAF50').pack(pady=(20, 5))
-        # Short description
-        tk.Label(print_win, text="FunPass: Amusement Park Ticketing System", font=('Arial', 10, 'italic'), fg='#6b7280', bg='white').pack(pady=(0, 10))
-        # Main title
-        tk.Label(print_win, text="FunPass Booking Receipt", font=('Arial', 18, 'bold'), bg='white').pack(pady=(0, 10))
-        # Booking Details Frame
-        details_frame = tk.LabelFrame(print_win, text="Booking Details", font=('Arial', 12, 'bold'), bg='white', fg='black', padx=15, pady=15, relief='solid', bd=1)
-        details_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-        # Details fields
+            self.logo_image = ImageTk.PhotoImage(logo_img)
+            logo_label = tk.Label(main_frame, image=self.logo_image, bg='white')
+            logo_label.pack(pady=(18, 4))
+        except Exception:
+            tk.Label(main_frame, text="FunPass", font=('Arial', 18, 'bold'), bg='white', fg='#4CAF50').pack(pady=(18, 4))
+
+        tk.Label(main_frame, text="FunPass: Amusement Park Ticketing System", font=('Arial', 10, 'italic'), fg='#6b7280', bg='white', anchor='center', justify='center').pack(pady=(0, 4))
+        tk.Label(main_frame, text="FunPass Booking Receipt", font=('Arial', 15, 'bold'), bg='white', anchor='center', justify='center').pack(pady=(0, 10))
+
+        # Booking Details
+        details_frame = tk.LabelFrame(
+            main_frame, text="Booking Details",
+            font=('Arial', 10, 'bold'), bg='white', fg='black',
+            padx=10, pady=10, relief='solid', bd=1, labelanchor='n'
+        )
+        details_frame.pack(padx=30, pady=(0, 12), anchor='n')  # <-- anchor left
+
         fields = [
             ("Ticket ID:", ticket_id),
             ("Customer Name:", name),
@@ -934,18 +1084,23 @@ class EmployeeDashboard:
             ("Ticket Type:", pass_type),
             ("Quantity:", quantity),
             ("Unit Price:", f"₱{float(amount)/int(quantity):,.2f}" if quantity else f"₱{amount}"),
-            ("Total Amount:", f"₱{amount}"),
+            ("Total Amount:", f"₱{float(amount):,.2f}"),
             ("Booked Date:", booked_date),
             ("Purchased Date:", purchased_date)
         ]
-        for label, value in fields:
+        for i, (label, value) in enumerate(fields):
             row = tk.Frame(details_frame, bg='white')
-            row.pack(fill=tk.X, pady=2)
-            tk.Label(row, text=label, font=('Arial', 11, 'bold'), bg='white', anchor='w', width=16).pack(side=tk.LEFT)
-            tk.Label(row, text=str(value), font=('Arial', 11), bg='white', anchor='w').pack(side=tk.LEFT, padx=10)
+            row.pack(fill=tk.X, pady=2, anchor='w')  # <-- anchor left
+            tk.Label(row, text=label, font=('Arial', 10, 'bold'), bg='white', anchor='w', width=14, justify='left').pack(side=tk.LEFT)
+            tk.Label(row, text=str(value), font=('Arial', 10), bg='white', anchor='w', justify='left').pack(side=tk.LEFT, padx=(8, 0))
+
         # Terms & Conditions
-        terms_frame = tk.LabelFrame(print_win, text="Terms & Conditions", font=('Arial', 12, 'bold'), bg='white', fg='black', padx=15, pady=10, relief='solid', bd=1)
-        terms_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        terms_frame = tk.LabelFrame(
+            main_frame, text="Terms & Conditions",
+            font=('Arial', 10, 'bold'), bg='white', fg='black',
+            padx=10, pady=6, relief='solid', bd=1, labelanchor='n'
+        )
+        terms_frame.pack(padx=30, pady=(0, 12), anchor='center')
         terms = [
             "Tickets are valid only for the booked date",
             "No refunds for unused tickets",
@@ -953,81 +1108,70 @@ class EmployeeDashboard:
             "Subject to park rules and regulations"
         ]
         for term in terms:
-            tk.Label(terms_frame, text=f"• {term}", font=('Arial', 10), bg='white', anchor='w', justify='left').pack(anchor='w', pady=1)
-        tk.Button(print_win, text="Close", command=print_win.destroy, bg='white', font=('Arial', 11), relief='groove').pack(pady=10)
+            tk.Label(terms_frame, text=f"• {term}", font=('Arial', 9), bg='white', anchor='w', justify='left').pack(anchor='w', pady=0)
 
+        tk.Button(main_frame, text="Close", command=print_win.destroy, bg='white', font=('Arial', 10), relief='groove').pack(pady=8)
+    
     def show_cancellations(self):
         self.clear_content()
-        cancel_title = tk.Label(self.content_frame, text="Cancellations & Refunds", font=('Arial', 16, 'bold'), bg='white', anchor='w')
-        cancel_title.pack(pady=(10, 0), padx=20, anchor='w')
-        cancel_subtitle = tk.Label(self.content_frame, text="Add, Edit, and Delete Cancellation Requests (Status is always Pending)", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        cancel_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+        # --- Title and subtitle, styled to match AdminDashboard ---
+        cancel_title = tk.Label(self.content_frame, text="Cancellations & Refunds", font=('Segoe UI', 20, 'bold'), bg='white', anchor='w')
+        cancel_title.pack(pady=(20, 0), padx=30, anchor='w')
+        cancel_subtitle = tk.Label(self.content_frame, text="Add, Edit, and Delete Cancellation Requests (Status is always Pending)", font=('Segoe UI', 15), fg='#6b7280', bg='white', anchor='w')
+        cancel_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
 
-        # Controls frame
+        # --- Controls frame with themed background ---
         controls_frame = tk.Frame(self.content_frame, bg='white')
-        controls_frame.pack(fill=tk.X, pady=10, padx=20)
-
-        # Search and Sort
+        controls_frame.pack(fill=tk.X, pady=10, padx=30)
         left_frame = tk.Frame(controls_frame, bg='white')
         left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Search
         search_frame = tk.Frame(left_frame, bg='white')
         search_frame.pack(side=tk.LEFT, fill=tk.X)
         tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
         self.cancel_search_var = tk.StringVar()
         self.cancel_search_var.trace('w', self.search_cancellations)
-        search_entry = tk.Entry(search_frame, textvariable=self.cancel_search_var, font=('Arial', 11), width=30)
+        search_entry = tk.Entry(search_frame, textvariable=self.cancel_search_var, font=('Segoe UI', 11), width=30)
         search_entry.pack(side=tk.LEFT, padx=5)
-
-        # Sort
         sort_frame = tk.Frame(left_frame, bg='white')
         sort_frame.pack(side=tk.LEFT)
         tk.Label(sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], 
-                                  font=('Arial', 11), width=15)
+        sort_options = ttk.Combobox(sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"], font=('Segoe UI', 10), width=15)
         sort_options.pack(side=tk.LEFT, padx=5)
         sort_options.set("Name (A-Z)")
         sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_cancellations(sort_options.get()))
-
-        # Buttons
         btn_frame = tk.Frame(controls_frame, bg='white')
         btn_frame.pack(side=tk.RIGHT, padx=10)
-        tk.Button(btn_frame, text="Add Request", command=self.add_cancellation_dialog, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Edit Request", command=self.edit_cancellation_dialog, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Delete Request", command=self.delete_cancellation, bg='#f44336', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Add Request", command=self.add_cancellation_dialog, bg='#4CAF50', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Edit Request", command=self.edit_cancellation_dialog, bg='#2196F3', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Delete Request", command=self.delete_cancellation, bg='#f44336', fg='white', font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=5)
 
-        # Tree view frame
-        tree_frame = tk.Frame(self.content_frame, bg='white')
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Scrollbars
-        y_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
-        x_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
-        
-        # Treeview
+        # --- Table in a modern rounded card ---
+        card_w, card_h, card_r = 1000, 400, 35
+        table_card_canvas = tk.Canvas(self.content_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
+        table_card_canvas.pack(padx=30, pady=(10, 0))
+        self.draw_rounded_rect(table_card_canvas, 0, 0, card_w, card_h, card_r, fill='white', outline='')
+        table_inner = tk.Frame(table_card_canvas, bg='white')
+        table_card_canvas.create_window((card_w//2, card_h//2), window=table_inner, anchor='center', width=card_w-30, height=card_h-30)
         columns = ('Ticket ID', 'Name', 'Email', 'Reasons', 'Quantity', 'Amount', 'Pass Type', 'Booked Date', 'Purchased Date', 'Status')
-        self.cancellations_tree = ttk.Treeview(tree_frame, columns=columns, show='headings',
-                                              yscrollcommand=y_scrollbar.set,
-                                              xscrollcommand=x_scrollbar.set)
-
-        # Configure scrollbars
-        y_scrollbar.config(command=self.cancellations_tree.yview)
-        x_scrollbar.config(command=self.cancellations_tree.xview)
-
-        # Configure column headings
+        self.cancellations_tree = ttk.Treeview(table_inner, columns=columns, show='headings', height=12)
         for col in columns:
-            self.cancellations_tree.heading(col, text=col, anchor='w')
-            # Set a reasonable minimum width for each column
-            self.cancellations_tree.column(col, minwidth=100, width=120, stretch=True)
-
-        # Pack everything
+            self.cancellations_tree.heading(col, text=col)
+            self.cancellations_tree.column(col, width=120)
+        self.cancellations_tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        y_scrollbar = ttk.Scrollbar(table_inner, orient=tk.VERTICAL, command=self.cancellations_tree.yview)
         y_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        x_scrollbar = ttk.Scrollbar(table_inner, orient=tk.HORIZONTAL, command=self.cancellations_tree.xview)
         x_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.cancellations_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
- 
-        # Load the data
+        self.cancellations_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
         self.load_cancellations_data()
+        def clear_cancellations_selection(event):
+            self.cancellations_tree.selection_remove(self.cancellations_tree.selection())
+        self.cancellations_tree.bind("<FocusOut>", clear_cancellations_selection)
+        def clear_selection_on_click(event):
+            region = self.cancellations_tree.identify("region", event.x, event.y)
+            if region == "nothing":
+                self.cancellations_tree.selection_remove(self.cancellations_tree.selection())
+        self.cancellations_tree.bind("<Button-1>", clear_selection_on_click, add="+")
 
     def load_cancellations_data(self):
         # Clear existing items
@@ -1134,38 +1278,50 @@ class EmployeeDashboard:
         tk.Label(main_frame, text="Ticket ID:", font=('Arial', 11), bg='white').pack(anchor='w')
         ticket_id_entry = tk.Entry(main_frame, font=('Arial', 11))
         ticket_id_entry.pack(fill=tk.X, pady=(0, 10))
+        
         # Name
         tk.Label(main_frame, text="Name:", font=('Arial', 11), bg='white').pack(anchor='w')
         name_entry = tk.Entry(main_frame, font=('Arial', 11))
         name_entry.pack(fill=tk.X, pady=(0, 10))
-        # Email
-        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        
+        # Email (optional)
+        tk.Label(main_frame, text="Email (optional):", font=('Arial', 11), bg='white').pack(anchor='w')
         email_entry = tk.Entry(main_frame, font=('Arial', 11))
         email_entry.pack(fill=tk.X, pady=(0, 10))
+        
         # Reasons
         tk.Label(main_frame, text="Reasons:", font=('Arial', 11), bg='white').pack(anchor='w')
         reasons_entry = tk.Entry(main_frame, font=('Arial', 11))
         reasons_entry.pack(fill=tk.X, pady=(0, 10))
+        
         # Quantity
         tk.Label(main_frame, text="Quantity:", font=('Arial', 11), bg='white').pack(anchor='w')
         quantity_entry = tk.Entry(main_frame, font=('Arial', 11))
         quantity_entry.pack(fill=tk.X, pady=(0, 10))
+        
         # Amount
         tk.Label(main_frame, text="Amount:", font=('Arial', 11), bg='white').pack(anchor='w')
         amount_entry = tk.Entry(main_frame, font=('Arial', 11))
         amount_entry.pack(fill=tk.X, pady=(0, 10))
+        
         # Booked Date
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         booked_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         booked_date_entry.pack(fill=tk.X, pady=(0, 10))
+       
         # Purchased Date
         tk.Label(main_frame, text="Purchased Date:", font=('Arial', 11), bg='white').pack(anchor='w')
         purchased_date_entry = DateEntry(main_frame, font=('Arial', 11), width=18, date_pattern='MM/dd/yyyy')
         purchased_date_entry.pack(fill=tk.X, pady=(0, 10))
-        # Pass Type
+        
+        # Pass Type (dropdown with default value)
         tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
-        pass_type_combo = ttk.Combobox(main_frame, values=self.get_pass_types(), font=('Arial', 11))
+        pass_types = self.get_pass_types()
+        pass_type_combo = ttk.Combobox(main_frame, values=pass_types, font=('Arial', 11), state="readonly")
         pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        if pass_types:
+            pass_type_combo.set(pass_types[0])  # Set default to "Express Pass"
+            
         def save_cancellation():
             ticket_id = ticket_id_entry.get().strip()
             name = name_entry.get().strip()
@@ -1173,6 +1329,30 @@ class EmployeeDashboard:
             reasons = reasons_entry.get().strip()
             quantity = quantity_entry.get().strip()
             amount = amount_entry.get().strip()
+            pass_type = pass_type_combo.get().strip()
+
+            # 1. Check ticket exists
+            conn = sqlite3.connect('funpass.db')
+            cursor = conn.cursor()
+            cursor.execute('SELECT name, email, quantity, amount, pass_type FROM customers WHERE ticket_id=?', (ticket_id,))
+            customer = cursor.fetchone()
+            if not customer:
+                messagebox.showerror("Error", "Ticket ID does not exist!")
+                conn.close()
+                return
+
+            # 2. Check for duplicate cancellation
+            cursor.execute('SELECT 1 FROM cancellations WHERE ticket_id=?', (ticket_id,))
+            if cursor.fetchone():
+                messagebox.showerror("Error", "A cancellation for this Ticket ID already exists!")
+                conn.close()
+                return
+
+            # 3. Validate details match
+            if (name != customer[0] or email != customer[1] or int(quantity) != customer[2] or float(amount) != customer[3] or pass_type != customer[4]):
+                messagebox.showerror("Error", "Cancellation details do not match the original purchase!")
+                conn.close()
+                return
             
             # Format dates correctly
             try:
@@ -1184,8 +1364,9 @@ class EmployeeDashboard:
 
             pass_type = pass_type_combo.get().strip()
 
-            if not (ticket_id and name and email and reasons and quantity and amount and booked_date and purchased_date and pass_type):
-                messagebox.showerror("Error", "All fields are required!")
+            # Email is optional now
+            if not (ticket_id and name and reasons and quantity and amount and booked_date and purchased_date and pass_type):
+                messagebox.showerror("Error", "All fields except Email are required!")
                 return
 
             try:
@@ -1238,8 +1419,8 @@ class EmployeeDashboard:
         name_entry = tk.Entry(main_frame, textvariable=name_var, font=('Arial', 11))
         name_entry.pack(fill=tk.X, pady=(0, 10))
 
-        # Email
-        tk.Label(main_frame, text="Email:", font=('Arial', 11), bg='white').pack(anchor='w')
+        # Email (optional)
+        tk.Label(main_frame, text="Email (optional):", font=('Arial', 11), bg='white').pack(anchor='w')
         email_var = tk.StringVar(value=values[2])
         email_entry = tk.Entry(main_frame, textvariable=email_var, font=('Arial', 11))
         email_entry.pack(fill=tk.X, pady=(0, 10))
@@ -1262,11 +1443,14 @@ class EmployeeDashboard:
         amount_entry = tk.Entry(main_frame, textvariable=amount_var, font=('Arial', 11))  # Removed readonly state
         amount_entry.pack(fill=tk.X, pady=(0, 10))
 
-        # Pass Type
+        # Pass Type (dropdown with default value)
         tk.Label(main_frame, text="Pass Type:", font=('Arial', 11), bg='white').pack(anchor='w')
+        pass_types = self.get_pass_types()
         pass_type_var = tk.StringVar(value=values[6])
-        pass_type_combo = ttk.Combobox(main_frame, textvariable=pass_type_var, values=self.get_pass_types(), font=('Arial', 11))
+        pass_type_combo = ttk.Combobox(main_frame, textvariable=pass_type_var, values=pass_types, font=('Arial', 11), state="readonly")
         pass_type_combo.pack(fill=tk.X, pady=(0, 10))
+        if pass_types and values[6] not in pass_types:
+            pass_type_combo.set(pass_types[0])  # Fallback to default if current value not in list
 
         # Booked Date (now editable)
         tk.Label(main_frame, text="Booked Date:", font=('Arial', 11), bg='white').pack(anchor='w')
@@ -1305,7 +1489,7 @@ class EmployeeDashboard:
 
         def save_edit():
             name = name_var.get().strip()
-            email = email_var.get().strip()
+            email = email_var.get().strip()  # Optional
             reasons = reasons_text.get('1.0', 'end-1c').strip()
             quantity = quantity_var.get().strip()
             amount = amount_var.get().strip()
@@ -1318,8 +1502,9 @@ class EmployeeDashboard:
                 messagebox.showerror("Error", "Invalid date format!")
                 return
 
-            if not all([name, email, reasons, quantity, amount, pass_type, booked_date, purchased_date]):
-                messagebox.showerror("Error", "All fields are required!")
+            # Email is optional now
+            if not all([name, reasons, quantity, amount, pass_type, booked_date, purchased_date]):
+                messagebox.showerror("Error", "All fields except Email are required!")
                 return
 
             try:
@@ -1377,29 +1562,31 @@ class EmployeeDashboard:
 
     def show_pricing(self):
         self.clear_content()
-        pricing_title = tk.Label(self.content_frame, text="Pass Type Pricing", font=('Arial', 16, 'bold'), bg='white', anchor='w')
-        pricing_title.pack(pady=(10, 0), padx=20, anchor='w')
-        pricing_subtitle = tk.Label(self.content_frame, text="View Only - Pricing is managed by Admin", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
-        pricing_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
+        # --- Title and subtitle, styled to match AdminDashboard ---
+        pricing_title = tk.Label(self.content_frame, text="Pass Type Pricing", font=('Segoe UI', 20, 'bold'), bg='white', anchor='w')
+        pricing_title.pack(pady=(20, 0), padx=30, anchor='w')
+        pricing_subtitle = tk.Label(self.content_frame, text="View Only - Pricing is managed by Admin", font=('Segoe UI', 15), fg='#6b7280', bg='white', anchor='w')
+        pricing_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
 
-        # Create and store reference to price frame
-        self.current_price_frame = tk.Frame(self.content_frame, bg='white')
-        self.current_price_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
-
-        # Get fresh prices from database
+        # --- Table in a modern rounded card ---
+        card_w, card_h, card_r = 800, 400, 35
+        table_card_canvas = tk.Canvas(self.content_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
+        table_card_canvas.pack(padx=30, pady=(10, 0))
+        self.draw_rounded_rect(table_card_canvas, 0, 0, card_w, card_h, card_r, fill='white', outline='')
+        table_inner = tk.Frame(table_card_canvas, bg='white')
+        table_card_canvas.create_window((card_w//2, card_h//2), window=table_inner, anchor='center', width=card_w-30, height=card_h-30)
         prices = self.get_all_prices()
-
         for pass_type, current_price in prices:
-            row = tk.Frame(self.current_price_frame, bg='white')
-            row.pack(fill=tk.X, pady=10, padx=10)
-            label = tk.Label(row, text=pass_type, font=('Arial', 12, 'bold'), bg='white', width=20, anchor='w')
+            row = tk.Frame(table_inner, bg='white')
+            row.pack(fill=tk.X, pady=10, padx=30)
+            label = tk.Label(row, text=pass_type, font=('Segoe UI', 12, 'bold'), bg='white', width=20, anchor='w')
             label.pack(side=tk.LEFT, padx=(20, 10), pady=10)
             price_frame = tk.Frame(row, bg='white')
             price_frame.pack(side=tk.LEFT, pady=10)
-            currency_label = tk.Label(price_frame, text="₱", font=('Arial', 12, 'bold'), bg='white')
+            currency_label = tk.Label(price_frame, text="₱", font=('Segoe UI', 12, 'bold'), bg='white')
             currency_label.pack(side=tk.LEFT, padx=(0, 5))
             price_var = tk.StringVar(value=f"{current_price:,.2f}")
-            price_entry = tk.Entry(price_frame, textvariable=price_var, font=('Arial', 12, 'bold'), bg='white', width=10, justify='right', state='readonly', relief='flat')
+            price_entry = tk.Entry(price_frame, textvariable=price_var, font=('Segoe UI', 12, 'bold'), bg='white', width=10, justify='right', state='readonly', relief='flat')
             price_entry.pack(side=tk.LEFT)
 
     def get_all_prices(self):
@@ -1487,6 +1674,25 @@ class EmployeeDashboard:
             from login import show_login
             show_login()
 
+    def send_ticket_via_email(self, recipient_email, ticket_content):
+        # Email configuration
+        sender_email = "funpasstothemagicalpark@gmail.com"
+        sender_password = "qauf qaub sexo hefs"  # Use an app password for Gmail
+
+        msg = EmailMessage()
+        msg['Subject'] = 'Your FunPass Ticket'
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg.set_content(ticket_content)
+
+        try:
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+                smtp.login(sender_email, sender_password)
+                smtp.send_message(msg)
+            print("Ticket sent successfully!")
+        except Exception as e:
+            print(f"Failed to send ticket: {e}")
+        
 if __name__ == "__main__":
     root = tk.Tk()
     create_database()
