@@ -320,7 +320,12 @@ class AdminDashboard:
         cursor = conn.cursor()
         cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM customers')
         total_sales = cursor.fetchone()[0] or 0
-        cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM cancellations WHERE status="Approved"')
+        cursor.execute('''
+            SELECT COALESCE(SUM(ca.amount), 0)
+            FROM cancellations ca
+            WHERE ca.status="Approved"
+            AND ca.ticket_id IN (SELECT ticket_id FROM customers)
+            ''')
         total_refunds = cursor.fetchone()[0] or 0
         net_total_sales = total_sales - total_refunds
         cursor.execute('''SELECT COALESCE(SUM(amount), 0) FROM customers WHERE strftime('%Y-%m', purchased_date) = strftime('%Y-%m', 'now')''')
@@ -1707,21 +1712,25 @@ class AdminDashboard:
             body = f"""\
 Hello {name},
 
-Your cancellation request for Ticket ID {ticket_id} has been APPROVED.
+We are pleased to inform you that your cancellation request for Ticket ID {ticket_id} has been successfully APPROVED.
+Our team has reviewed your request and the necessary documents, and everything appears to be in order. The refund process has now been initiated, and you can expect to receive your refund within the next 5 to 7 business days, depending on your payment method and bank processing times.If you do not receive the refund within this period, or if you have any further concerns, please do not hesitate to reach out to us at funpasstothemagicalpark@gmail.com or visit our customer service desk in person.
 
-You will receive your refund soon. Thank you for using FunPass!
+Thank you for using FunPass and for being a valued guest of the FunPass Amusement Park. We hope to see you again soon for a more magical experience.
 
-FunPass Amusement Park
+Best regards,
+FunPass: Amusement Park Ticketing System
 """
         elif status == "Rejected":
             body = f"""\
 Hello {name},
 
-Your cancellation request for Ticket ID {ticket_id} has been REJECTED.
+We regret to inform you that your cancellation request for Ticket ID {ticket_id} has been REJECTED.
+After careful review by our team, we found that the request did not meet the necessary requirements for approval. This may be due to incomplete or missing documents, invalid justification, or the request being made outside the allowable cancellation period. If you believe this decision was made in error or if you have additional documents that may support your request, we encourage you to resubmit your cancellation request or visit our customer service desk for further assistance.
 
-If you have questions, please contact our support.
+Please understand that our cancellation policy is in place to ensure fairness to all our guests and to maintain smooth operations within the park. We appreciate your understanding and thank you for being part of the FunPass experience. We still hope to welcome you back for a joyful and memorable visit in the future.
 
-FunPass Amusement Park
+Best regards,  
+FunPass: Amusement Park Ticketing System 
 """
         else:
             return  # Only send for Approved or Rejected

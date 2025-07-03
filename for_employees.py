@@ -1212,7 +1212,8 @@ Purchased Date: {purchased_date}
 Please present this receipt at the entrance.
 Enjoy your visit!
 
-FunPass Amusement Park
+Best regards,
+FunPass: Amusement Park Ticketing System
 """
 
         msg = EmailMessage()
@@ -1244,10 +1245,10 @@ We have received your cancellation request for Ticket ID {ticket_id}.
 Your request is now pending and being reviewed by our team.
 
 You will receive another email once your request is approved or rejected.
-
 Thank you for using FunPass!
 
-FunPass Amusement Park
+Best regards,
+FunPass: Amusement Park Ticketing System
 """
 
         msg = EmailMessage()
