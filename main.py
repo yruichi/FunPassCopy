@@ -16,6 +16,8 @@ import time
 import random
 # Import shared utilities (database creation, base window class)
 from shared import create_database, BaseWindow
+import smtplib
+from email.message import EmailMessage
 
 # Utility function for drawing rounded rectangles (to avoid code duplication)
 def draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kwargs):
@@ -49,8 +51,11 @@ class AdminDashboard:
         self.root = root
         # Set the window title
         self.root.title("FunPass - Admin Dashboard")
-        # Maximize the window on open
-        self.root.state('zoomed')
+        # Make the window full screen and dynamic
+        try:
+            self.root.attributes('-zoomed', True)  # Windows full screen
+        except Exception:
+            self.root.state('zoomed')  # Fallback for other platforms
         # Set a background for the root window so the padding is visible
         self.root.configure(bg='white')
         # Configure grid: row 0 will expand vertically
@@ -63,9 +68,10 @@ class AdminDashboard:
         self.price_entries = {}
         # Create the sidebar navigation (buttons, logo)
         self.create_sidebar()
-        # Main content area (right side of the window)
-        self.content_frame = tk.Frame(self.root, bg='white') 
-        self.content_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        # Set a fixed size for the main content frame
+        self.content_frame = tk.Frame(self.root, bg='white', width=3000, height=2000)
+        self.content_frame.grid(row=0, column=1, padx=20, pady=20)
+        self.content_frame.pack_propagate(False)
         # Show dashboard by default on startup
         self.show_dashboard()
 
@@ -91,19 +97,28 @@ class AdminDashboard:
         return False
 
     def create_rounded_button(self, parent, text, command, width=200, height=38, radius=20, bg='#F0E7D9', fg='black', font=('Segoe UI', 10, 'normal')):
-        # Create a custom rounded button using a Canvas
+        # Make logout button always #8f1f07
+        is_logout = text.strip().startswith('🚪')
+        if is_logout:
+            btn_bg = '#8f1f07'
+            btn_fg = 'white'
+            hover_bg = '#6b1604'
+        else:
+            btn_bg = bg
+            btn_fg = fg
+            hover_bg = '#F6F6F6'
         btn_canvas = tk.Canvas(parent, width=width, height=height, bg=parent['bg'], highlightthickness=0)
-        rect = draw_rounded_rect(btn_canvas, 2, 2, width-2, height-2, radius, fill=bg)
-        label = btn_canvas.create_text(14, height//2, text=text, fill=fg, font=font, anchor='w')
+        rect = draw_rounded_rect(btn_canvas, 2, 2, width-2, height-2, radius, fill=btn_bg)
+        label = btn_canvas.create_text(14, height//2, text=text, fill=btn_fg, font=font, anchor='w')
         btn_canvas.bind("<Button-1>", lambda e: command())
         def on_enter(e):
             if self._is_sidebar_active(text):
                 return
-            btn_canvas.itemconfig(rect, fill='#F6F6F6')
+            btn_canvas.itemconfig(rect, fill=hover_bg)
         def on_leave(e):
             if self._is_sidebar_active(text):
                 return
-            btn_canvas.itemconfig(rect, fill=bg)
+            btn_canvas.itemconfig(rect, fill=btn_bg)
         btn_canvas.bind("<Enter>", on_enter)
         btn_canvas.bind("<Leave>", on_leave)
         return btn_canvas
@@ -113,7 +128,7 @@ class AdminDashboard:
         # Create the sidebar with navigation buttons and logo
         # Sidebar dimensions
         sidebar_width = 280
-        sidebar_height = 670  # Fixed height for visible rounded corners
+        sidebar_height = 1000 # Fixed height for visible rounded corners
         corner_radius = 40
 
         sidebar_container = tk.Frame(self.root, bg='white')
@@ -153,9 +168,9 @@ class AdminDashboard:
         self.sidebar_button_names = [
             ("🏠  Dashboard", self.show_dashboard),
             ("🎢  Rides", self.show_rides),
-            ("💼  Employee Management", self.show_employee_management),
+            ("💼  Employees", self.show_employee_management),
             ("👥  Customers", self.show_customers),
-            ("❌  Cancellations & Refunds", self.show_cancellations),
+            ("❌  C Requests", self.show_cancellations),
             ("💳  Pricing", self.show_pricing),
             ("🚪  Logout", self.logout)
         ]
@@ -173,10 +188,12 @@ class AdminDashboard:
         # Highlight the active sidebar button
         active_color = '#FFD966'  # Highlight color for active
         default_color = '#F0E7D9'  # Default button color
+        logout_color = '#FFD966'
         for name, btn_canvas in self.sidebar_buttons.items():
-            # Find the rectangle id (always 1st item created)
             rect_id = 1
-            if name == page_name:
+            if name == "🚪  Logout":
+                btn_canvas.itemconfig(rect_id, fill=logout_color)
+            elif name == page_name:
                 btn_canvas.itemconfig(rect_id, fill=active_color)
             else:
                 btn_canvas.itemconfig(rect_id, fill=default_color)
@@ -188,19 +205,19 @@ class AdminDashboard:
         card_w, card_h, card_r = 1000, 673, 45
         self.main_content_canvas = tk.Canvas(self.content_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
         self.main_content_canvas.pack(padx=0, pady=0)
-        draw_rounded_rect(self.main_content_canvas, 0, 0, card_w, card_h, card_r, fill='#F0E7D9', outline='')
-        main_content_inner = tk.Frame(self.main_content_canvas, bg='#F0E7D9')
+        draw_rounded_rect(self.main_content_canvas, 0, 0, card_w, card_h, card_r, fill="#FFFFFF", outline='')
+        main_content_inner = tk.Frame(self.main_content_canvas, bg="#FFFFFF")
         self.main_content_canvas.create_window((card_w//2, card_h//2), window=main_content_inner, anchor='center', width=card_w-20, height=card_h-20)
         return main_content_inner
 
     def create_scrollable_main_content_frame(self):
         if hasattr(self, 'main_content_canvas') and self.main_content_canvas.winfo_exists():
             self.main_content_canvas.destroy()
-        card_w, card_h, card_r = 1000, 673, 45
+        card_w, card_h, card_r = 1000, 800, 45
         self.main_content_canvas = tk.Canvas(self.content_frame, width=card_w, height=card_h, bg='white', highlightthickness=0)
         self.main_content_canvas.pack(padx=0, pady=0)
-        draw_rounded_rect(self.main_content_canvas, 0, 0, card_w, card_h, card_r, fill='#F0E7D9', outline='')
-        scroll_canvas = tk.Canvas(self.main_content_canvas, bg='#F0E7D9', highlightthickness=0, width=card_w-20, height=card_h-20)
+        draw_rounded_rect(self.main_content_canvas, 0, 0, card_w, card_h, card_r, fill="#FFFFFF", outline='')
+        scroll_canvas = tk.Canvas(self.main_content_canvas, bg="#FFFFFF", highlightthickness=0, width=card_w-20, height=card_h-20)
         scroll_window = self.main_content_canvas.create_window((card_w//2, card_h//2), window=scroll_canvas, anchor='center', width=card_w-20, height=card_h-20)
         v_scrollbar = tk.Scrollbar(self.main_content_canvas, orient=tk.VERTICAL, command=scroll_canvas.yview)
         # v_scrollbar.pack(fill=tk.Y, side=tk.RIGHT)  # invisible
@@ -229,23 +246,29 @@ class AdminDashboard:
     def show_dashboard(self):
         self.clear_content()
         self.set_active_sidebar('🏠  Dashboard')
-        dashboard_frame = self.create_scrollable_main_content_frame()
+        # dashboard_frame = self.create_scrollable_main_content_frame()
+        dashboard_frame = tk.Frame(self.content_frame, bg='#F0E7D9')
+        dashboard_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Centering frame for all content
+        center_frame = tk.Frame(dashboard_frame, bg='#F0E7D9')
+        center_frame.pack(expand=True)
         # Place all dashboard widgets inside dashboard_frame (no nested scrollable frames)
         title_font = ('Segoe UI', 20, 'bold')
         subtitle_font = ('Segoe UI', 15, 'normal')
         section_title_font = ('Segoe UI', 15, 'bold')
         label_font = ('Segoe UI', 10, 'normal')
         dashboard_title = tk.Label(
-            dashboard_frame, text="Dashboard", font=title_font, bg='#F0E7D9', anchor='w', fg='#22223B'
+            dashboard_frame, text="Dashboard", font=title_font, bg="#F0E7D9", anchor='w', fg='#22223B'
         )
         dashboard_title.pack(pady=(20, 0), padx=30, anchor='w')
         dashboard_subtitle = tk.Label(
             dashboard_frame, text="View and Manage FunPass: Amusement Park Ticketing System",
-            font=subtitle_font, fg='#6b7280', bg='#F0E7D9', anchor='w'
+            font=subtitle_font, fg='#6b7280', bg="#F0E7D9", anchor='w'
         )
         dashboard_subtitle.pack(fill=tk.X, padx=30, anchor='w')
         # Top bar with date and time - MODERN CARDED DESIGN
-        top_bar_card, top_bar_frame = self.create_rounded_card(dashboard_frame, width=900, height=150, radius=45, bg='#FFFFFF', inner_bg='#FFFFFF')
+        top_bar_card, top_bar_frame = self.create_rounded_card(dashboard_frame, width=1500, height=150, radius=45, bg='#FFFFFF', inner_bg='#FFFFFF')
         top_bar_card.pack(pady=20, padx=30, fill='x', expand=False)
         
         # Time and date labels with better styling
@@ -282,7 +305,7 @@ class AdminDashboard:
         
         self.update_time()
         # Overview Card
-        overview_card, overview_frame = self.create_rounded_card(dashboard_frame, width=900, height=310, radius=45, bg='#FFFFFF', inner_bg='#FFFFFF')
+        overview_card, overview_frame = self.create_rounded_card(dashboard_frame, width=1500, height=310, radius=45, bg='#FFFFFF', inner_bg='#FFFFFF')
         overview_card.pack(pady=20, padx=30, fill='x', expand=False)
         tk.Label(overview_frame, text='Overview', font=section_title_font, bg='#FFFFFF', fg='#22223B', anchor='w').pack(anchor='w', pady=(10, 0), padx=20)
         stats_grid = tk.Frame(overview_frame, bg='#FFFFFF')
@@ -336,7 +359,7 @@ class AdminDashboard:
             tk.Label(stat, text=value, font=('Segoe UI', 20, 'bold'), fg=color, bg='#E5ECCB').pack(anchor='w', padx=10, pady=(0, 8))
 
         # Top Performing Employees Card
-        top_emp_card, top_emp_frame = self.create_rounded_card(dashboard_frame, width=900, height=300, radius=40, bg='#FFFFFF', inner_bg='#FFFFFF')
+        top_emp_card, top_emp_frame = self.create_rounded_card(dashboard_frame, width=1500, height=300, radius=40, bg='#FFFFFF', inner_bg='#FFFFFF')
         top_emp_card.pack(pady=20, padx=30, fill='x', expand=False)
         tk.Label(top_emp_frame, text='Top Performing Employees', font=section_title_font, bg='#FFFFFF', fg='#22223B', anchor='w').pack(anchor='w', pady=(80, 0), padx=20)
         table_frame = tk.Frame(top_emp_frame, bg='#FFFFFF')
@@ -371,58 +394,6 @@ class AdminDashboard:
             tickets = str(tickets) if tickets else "0"
             emp_tree.insert('', tk.END, values=(name, tickets, formatted_sales))
 
-        # Recent Sales Card
-        recent_sales_card, recent_sales_frame = self.create_rounded_card(dashboard_frame, width=900, height=300, radius=40, bg='#FFFFFF', inner_bg='#FFFFFF')
-        recent_sales_card.pack(pady=20, padx=30, fill='x', expand=False)
-        tk.Label(recent_sales_frame, text='Recent Sales', font=section_title_font, bg='#FFFFFF', fg='#22223B', anchor='w').pack(anchor='w', pady=(80, 0), padx=20)
-        sales_table_frame = tk.Frame(recent_sales_frame, bg='#FFFFFF')
-        sales_table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        sales_columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
-        sales_tree = ttk.Treeview(sales_table_frame, columns=sales_columns, show='headings', height=8)
-        column_widths = {
-            'Ticket ID': 100,
-            'Name': 150,
-            'Email': 150,
-            'Pass Type': 120,
-            'Quantity': 70,
-            'Amount': 100,
-            'Booked Date': 100,
-            'Purchased Date': 100,
-            'Employee': 150
-        }
-        for col in sales_columns:
-            sales_tree.heading(col, text=col)
-            sales_tree.column(col, width=column_widths.get(col, 100))
-            if col in ['Quantity']:
-                sales_tree.column(col, anchor='center')
-            elif col in ['Amount']:
-                sales_tree.column(col, anchor='w')
-        sales_scrollbar = ttk.Scrollbar(sales_table_frame, orient=tk.VERTICAL, command=sales_tree.yview)
-        sales_tree.configure(yscrollcommand=sales_scrollbar.set)
-        sales_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Add mouse wheel scrolling support
-        def on_mousewheel_sales(event):
-            sales_tree.yview_scroll(int(-1*(event.delta/120)), 'units')
-        sales_tree.bind('<MouseWheel>', on_mousewheel_sales)
-        def load_recent_sales(sort_option=None):
-            # Clear all rows in the sales_tree before loading new data
-            sales_tree.delete(*sales_tree.get_children())
-            # Connect to the database
-            conn = sqlite3.connect('funpass.db')
-            cursor = conn.cursor()
-            # Query: Get the 5 most recent sales, joining with employee names
-            cursor.execute('''SELECT c.ticket_id, c.name, c.email, c.pass_type, c.quantity, c.amount, strftime('%m/%d/%Y', c.booked_date) as booked_date, strftime('%m/%d/%Y', c.purchased_date) as purchased_date, COALESCE(e.name, 'N/A') as employee_name FROM customers c LEFT JOIN employees e ON c.employee_id = e.employee_id ORDER BY datetime(c.purchased_date) DESC LIMIT 5''')
-            recent_sales = cursor.fetchall()
-            conn.close()
-            for sale in recent_sales:
-                formatted_values = list(sale)
-                # Format the amount as currency (₱X,XXX.XX)
-                formatted_values[5] = f"₱{float(sale[5]):,.2f}"
-                # Insert the row into the sales_tree
-                sales_tree.insert('', tk.END, values=formatted_values)
-        load_recent_sales()
-
     def update_time(self):
         # Update the time and date labels every second
         try:
@@ -438,28 +409,31 @@ class AdminDashboard:
 
     def show_rides(self):
         self.clear_content()
-        self.set_active_sidebar('🎢  Rides')
-        rides_frame = self.create_scrollable_main_content_frame()
-        header_row = tk.Frame(rides_frame, bg='#F0E7D9')
+        # --- Section background frame (like main.py) ---
+        rides_frame = tk.Frame(self.content_frame, bg='#F0E7D9')
+        rides_frame.pack(fill=tk.BOTH, expand=True)
+        # Centering frame for all content
+        center_frame = tk.Frame(rides_frame, bg='#F0E7D9')
+        center_frame.pack(expand=True)
+        # Header row
+        header_row = tk.Frame(center_frame, bg='#F0E7D9')
         header_row.pack(fill=tk.X, pady=(20, 0), padx=30)
         title = tk.Label(header_row, text="Pass Types and Inclusions", font=('Segoe UI', 20, 'bold'), bg='#F0E7D9', fg='black', anchor='w')
         title.pack(side=tk.LEFT, anchor='w')
-        
-        # Subtitle (optional)
-        subtitle = tk.Label(rides_frame, text="View rides descriptions and inclusions", font=('Segoe UI', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
+        # Subtitle
+        subtitle = tk.Label(center_frame, text="View rides descriptions and inclusions", font=('Segoe UI', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
         subtitle.pack(fill=tk.X, padx=30, anchor='w')
-
-        # Pass type cards grid
-        grid_frame = tk.Frame(rides_frame, bg='#F0E7D9')
-        grid_frame.pack(pady=(10, 10), padx=(0, 0), fill='both', expand=True)  # Increased right padding
-        card_w2, card_h2, card_r2 = 290, 270, 35  # Slightly reduced card width
+        # Pass type cards grid (centered)
+        grid_frame = tk.Frame(center_frame, bg='#F0E7D9')
+        grid_frame.pack(pady=(10, 10), padx=(0, 0), fill='both', expand=True)
+        card_w2, card_h2, card_r2 = 400, 350, 35
         card_bg = 'white'
         card_fg = 'black'
         card_padx = 20
         card_pady = 20
         pass_descriptions = [
             ("Express Pass", """• Priority access to all rides and attractions\n• Skip regular lines\n• Access to exclusive Express Pass lanes\n• Unlimited rides all day\n• Special discounts at food stalls\n• Free locker usage\n• Free parking\n• Exclusive souvenir"""),
-            ("Junior Pass", """• Access to all kid-friendly rides\n• Special access to children's play areas\n• Meet and greet with mascots\n• Free snack pack\n• Age requirement: 4-12 years old\n• Free kid's meal\n• Free face painting\n• Access to kids' workshops"""),
+            ("Junior Pass", """• Access to all kid-friendly rides\n• Special access to children's play areas\n• Meet and greet with mascots\n• Free snack pack\n• Age requirement: 4-12 years old\n• Free kids meal\n• Free face painting\n• Access to kids' workshops"""),
             ("Regular Pass", """• Standard access to all rides and attractions\n• Regular queue lines\n• Full day access\n• Basic amenities access\n• Suitable for all ages\n• Free water bottle\n• Access to rest areas\n• Standard locker rental rates"""),
             ("Student Pass", """• Access to all rides and attractions\n• Special student discount\n• Valid student ID required\n• Available on weekdays only\n• Includes free locker use\n• Free study area access\n• Student meal discount\n• Free WiFi access"""),
             ("Senior Citizen Pass", """• Access to all rides and attractions\n• Priority queuing at selected rides\n• Special assistance available\n• Senior citizen ID required\n• Includes free refreshments\n• Access to senior's lounge\n• Free health monitoring\n• Special meal options"""),
@@ -470,19 +444,44 @@ class AdminDashboard:
             col = idx % 3
             card_canvas2 = tk.Canvas(grid_frame, width=card_w2, height=card_h2, bg='#F0E7D9', highlightthickness=0)
             card_canvas2.grid(row=row, column=col, padx=card_padx, pady=card_pady, sticky='n')
-            # Draw the rounded rectangle and keep its id for outline changes
-            rect_id = draw_rounded_rect(card_canvas2, 0, 0, card_w2, card_h2, card_r2, fill=card_bg, outline='#E0E0E0', width=2)
+            rect_id = self.draw_rounded_rect(card_canvas2, 0, 0, card_w2, card_h2, card_r2, fill=card_bg, outline='#E0E0E0', width=2)
             card_frame2 = tk.Frame(card_canvas2, bg=card_bg)
             card_canvas2.create_window((card_w2//2, card_h2//2), window=card_frame2, anchor='center')
-            tk.Label(card_frame2, text=pass_type, font=('Segoe UI', 15, 'bold'), bg=card_bg, fg='#9A4E62').pack(anchor='w', padx=14, pady=(10, 0))
+            # Stat icon area
+            stat_icon_frame = tk.Frame(card_frame2, bg='#F7F7FA', width=48, height=48)
+            stat_icon_frame.pack(anchor='w', padx=14, pady=(12, 0))
+            stat_icon_frame.pack_propagate(False)
+            icon_map = {
+                'Express Pass': '⚡',
+                'Junior Pass': '🧒',
+                'Regular Pass': '🎟️',
+                'Student Pass': '🎓',
+                'Senior Citizen Pass': '👴',
+                'PWD Pass': '♿',
+            }
+            icon = icon_map.get(pass_type, '🎟️')
+            tk.Label(stat_icon_frame, text=icon, font=('Segoe UI', 22), bg='#F7F7FA', fg='#9A4E62').pack(expand=True)
+            tk.Label(card_frame2, text=pass_type, font=('Segoe UI', 15, 'bold'), bg=card_bg, fg='#9A4E62').pack(anchor='w', padx=14, pady=(4, 0))
             tk.Label(card_frame2, text=description, font=('Segoe UI', 10), bg=card_bg, fg=card_fg, justify=tk.LEFT, anchor='w', wraplength=card_w2-28).pack(anchor='w', padx=15, pady=(0, 15))
-            # Hover effect for glowing outline
-            def on_enter(event, canvas=card_canvas2, rid=rect_id):
-                canvas.itemconfig(rid, outline='#FFD700', width=5)  # Gold glow
-            def on_leave(event, canvas=card_canvas2, rid=rect_id):
-                canvas.itemconfig(rid, outline='#E0E0E0', width=2)
-            card_canvas2.bind('<Enter>', on_enter)
-            card_canvas2.bind('<Leave>', on_leave)
+            # No hover effect
+
+    # Utility for rounded rect (copy from main.py)
+    def draw_rounded_rect(self, canvas, x1, y1, x2, y2, r, **kwargs):
+        points = [
+            x1+r, y1,
+            x2-r, y1,
+            x2, y1,
+            x2, y1+r,
+            x2, y2-r,
+            x2, y2,
+            x2-r, y2,
+            x1+r, y2,
+            x1, y2,
+            x1, y2-r,
+            x1, y1+r,
+            x1, y1
+        ]
+        return canvas.create_polygon(points, smooth=True, **kwargs)
 
     def create_rounded_card(self, parent, width, height, radius=45, bg='#F5F6FA', inner_bg='white'):
         # Create a rounded card frame for content display
@@ -501,93 +500,130 @@ class AdminDashboard:
         return card_canvas, frame
 
     def show_employee_management(self):
+        import customtkinter as ctk
         self.clear_content()
         self.set_active_sidebar('💼  Employee Management')
-        card_frame = self.create_main_content_frame()
-        # Header row
-        header_row = tk.Frame(card_frame, bg='#F0E7D9')
-        header_row.pack(fill=tk.X, pady=(20, 0), padx=30)
-        emp_title = tk.Label(header_row, text="Employee", font=('Segoe UI', 20, 'bold'), bg='#F0E7D9', anchor='w', fg='#22223B')
-        emp_title.pack(side=tk.LEFT, anchor='w')
-        emp_subtitle = tk.Label(card_frame, text="View and manage employees", font=('Segoe UI', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
-        emp_subtitle.pack(fill=tk.X, padx=30, pady=(0, 18), anchor='w')
-        # Add Account button in its own row above controls_row
-        add_btn_row = tk.Frame(card_frame, bg='#F0E7D9')
-        add_btn_row.pack(fill=tk.X, padx=30, pady=(0, 0))
-        add_btn = tk.Button(add_btn_row, text="+ Add Account", command=lambda: self.show_employee_dialog(mode="add"), bg='#F0E7D9', fg='#6b7280', font=('Segoe UI', 10, 'bold'), bd=0, padx=5, pady=5, relief='flat', cursor='hand2')
-        add_btn.pack(side=tk.RIGHT, anchor='e')
 
-        # Controls row (simple, white background)
-        controls_row = tk.Frame(card_frame, bg='#9A4E62')
-        controls_row.pack(fill=tk.X, padx=28, pady=(0, 10))
-        # Left: Edit/Delete buttons
-        icon_btns_frame = tk.Frame(controls_row, bg='#9A4E62')
-        icon_btns_frame.pack(side=tk.LEFT, padx=(0, 0), pady=5)
-        edit_icon_btn = self.create_icon_button(
-            icon_btns_frame, "     ✏️", lambda: self.show_employee_dialog(mode="edit"),
-            bg='white', fg='black', size=36, radius=10, font_size=20
-        )
-        edit_icon_btn.pack(side=tk.LEFT, padx=5)
-        delete_icon_btn = self.create_icon_button(
-            icon_btns_frame, "     🗑️", self.delete_employee,
-            bg='white', fg='black', size=35, radius=10, font_size=20
-        )
-        delete_icon_btn.pack(side=tk.LEFT, padx=5)
+        # --- Main Card Container ---
+        card_frame = ctk.CTkFrame(self.content_frame, fg_color="#FFFFFF", corner_radius=0)
+        card_frame.pack(fill="both", expand=True, padx=30, pady=30)
 
-        # Right: Search bar (flat, rounded, with icon) and sort dropdown
-        search_frame = tk.Frame(controls_row, bg='white')
-        search_frame.pack(side=tk.RIGHT, padx=(0, 0), pady=0)
-        self.emp_search_var = tk.StringVar()
+        # --- Header ---
+        header_row = ctk.CTkFrame(card_frame, fg_color="#FFFFFF")
+        header_row.pack(fill="x", pady=(10, 0), anchor="w")
+        header_row.grid_columnconfigure(0, weight=1)
+        emp_title = ctk.CTkLabel(header_row, text="Employee", font=("Segoe UI", 22, "bold"), text_color="#22223B")
+        emp_title.grid(row=0, column=0, padx=15, sticky="w")
+        emp_subtitle = ctk.CTkLabel(header_row, text="View and manage employees", font=("Segoe UI", 15), text_color="#6b7280")
+        emp_subtitle.grid(row=1, column=0, padx=15,pady=10, sticky="w")
+
+        # --- Controls Bar ---
+        controls_bar = ctk.CTkFrame(card_frame, fg_color="#F0E7D9", corner_radius=0, height=50)
+        controls_bar.pack(fill="x", padx=10, pady=(0, 15))
+        controls_bar.grid_columnconfigure(0, weight=1)
+        controls_bar.grid_columnconfigure(1, weight=0)
+        controls_bar.grid_columnconfigure(2, weight=0)
+        controls_bar.grid_columnconfigure(3, weight=0)
+        controls_bar.grid_columnconfigure(4, weight=0)
+
+        # Search Entry
+        self.emp_search_var = ctk.StringVar()
         self.emp_search_var.trace('w', self.search_employees)
-        search_entry = tk.Entry(
-            search_frame, textvariable=self.emp_search_var,
-            font=('Segoe UI', 11), width=28, relief='flat', bd=1, bg='#f8f8f8', highlightthickness=1, highlightbackground='#e0e0e0'
+        search_entry = ctk.CTkEntry(
+            controls_bar,
+            textvariable=self.emp_search_var,
+            placeholder_text="Search Employee...",
+            placeholder_text_color="#858585",
+            width=220,
+            height=36,
+            font=("Segoe UI", 12),
+            text_color="#3f3f3f",
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
         )
-        search_entry.pack(side=tk.LEFT, fill='y', ipady=6, padx=(0, 0))
-        search_icon = tk.Label(search_frame, text="🔍", bg='#f8f8f8', font=('Segoe UI', 12), fg='#888')
-        search_icon.place(in_=search_entry, relx=1.0, x=-24, rely=0.5, anchor='e')
-        # Sort dropdown beside search bar
-        # Custom style for sort dropdown to match theme
-        style = ttk.Style()
-        style.theme_use('default')
-        style.configure(
-            "Theme.TCombobox",
-            fieldbackground="#9A4E62",  # Maroon background for entry field
-            background="#9A4E62",       # Maroon background for dropdown arrow
-            foreground="#fff",          # White text
-            bordercolor="#9A4E62",      # Maroon border
-            padding=8,                   # Extra padding for a modern look
-            relief="flat"
-        )
-        style.map(
-            "Theme.TCombobox",
-            fieldbackground=[('readonly', '#9A4E62')],
-            background=[('readonly', '#9A4E62')],
-            foreground=[('readonly', '#fff')]
-        )
-        # --- Create the sort dropdown with the custom style ---
-        sort_options = ttk.Combobox(
-            search_frame,
-            values=["Name (A-Z)", "Name (Z-A)", "Username (A-Z)", "Username (Z-A)"],
-            font=('Segoe UI', 10),
-            width=14,
-            state='readonly',
-            style="Theme.TCombobox"
-        )
-        sort_options.pack(side=tk.LEFT, padx=(10, 20), ipady=6)
-        sort_options.set("Name (A-Z)")
-        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_employees(sort_options.get()))
+        search_entry.grid(row=0, column=0, padx=(16, 8), pady=10, sticky="w")
 
-        table_frame = tk.Frame(card_frame, bg='#F9F9F9')
-        table_frame.pack(fill=tk.BOTH, expand=True, padx=28, pady=(0, 24))
+        # Sort Combobox (all columns)
+        emp_sort_options_list = [
+            ("ID (A-Z)", 0, False), ("ID (Z-A)", 0, True),
+            ("Name (A-Z)", 1, False), ("Name (Z-A)", 1, True),
+            ("Username (A-Z)", 2, False), ("Username (Z-A)", 2, True),
+            ("Password (A-Z)", 3, False), ("Password (Z-A)", 3, True),
+            ("Express Alloc (Lowest)", 4, False), ("Express Alloc (Highest)", 4, True),
+            ("Junior Alloc (Lowest)", 5, False), ("Junior Alloc (Highest)", 5, True),
+            ("Regular Alloc (Lowest)", 6, False), ("Regular Alloc (Highest)", 6, True),
+            ("Student Alloc (Lowest)", 7, False), ("Student Alloc (Highest)", 7, True),
+            ("PWD Alloc (Lowest)", 8, False), ("PWD Alloc (Highest)", 8, True),
+            ("Senior Alloc (Lowest)", 9, False), ("Senior Alloc (Highest)", 9, True),
+            ("Month Sales (Lowest)", 10, False), ("Month Sales (Highest)", 10, True)
+        ]
+        sort_options = ctk.CTkComboBox(
+            controls_bar,
+            values=[opt[0] for opt in emp_sort_options_list],
+            width=200,
+            font=("Segoe UI", 12),
+            dropdown_font=("Segoe UI", 12),
+            state="readonly",
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
+        )
+        sort_options.set("Name (A-Z)")
+        sort_options.grid(row=0, column=1, padx=(0, 8), pady=10)
+        sort_options.configure(command=lambda value: self.sort_employees(value))
+        self._emp_sort_options = emp_sort_options_list
+
+        # Edit Button
+        edit_btn = ctk.CTkButton(
+            controls_bar, text="✏️ Edit", width=70, height=36, fg_color="#FFFFFF", text_color="#4CAF50", hover_color="#C8E6C9", border_color="#ADADAD", border_width=2,
+            font=("Segoe UI", 12, "bold"), corner_radius=24, command=lambda: self.show_employee_dialog(mode="edit")
+        )
+        edit_btn.grid(row=0, column=2, padx=(0, 8), pady=10)
+
+        # Delete Button
+        delete_btn = ctk.CTkButton(
+            controls_bar, text="🗑️ Delete", width=90, height=36, fg_color="#FFFFFF", text_color="#f44336", hover_color="#FFCDD2", border_color="#ADADAD", border_width=2,
+            font=("Segoe UI", 12, "bold"), corner_radius=24, command=self.delete_employee
+        )
+        delete_btn.grid(row=0, column=3, padx=(0, 8), pady=10)
+
+        # Add Account Button
+        add_btn = ctk.CTkButton(
+            controls_bar, text="+ Add Account", width=140, height=36, fg_color="#4CAF50", text_color="#fff", hover_color="#388E3C",
+            font=("Segoe UI", 12, "bold"), corner_radius=10, command=lambda: self.show_employee_dialog(mode="add")
+        )
+        add_btn.grid(row=0, column=4, padx=(0, 12), pady=10)
+
+        # --- Table Frame (with scrollbars) ---
+        table_card = ctk.CTkFrame(card_frame, fg_color="#fff", corner_radius=18)
+        table_card.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        table_card.grid_rowconfigure(0, weight=1)
+        table_card.grid_columnconfigure(0, weight=1)
+
+        # Scrollbars
+        yscroll = ctk.CTkScrollbar(table_card, orientation="vertical")
+        xscroll = ctk.CTkScrollbar(table_card, orientation="horizontal")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+
+        # Table (ttk.Treeview inside CTkFrame)
+        import tkinter.ttk as ttk
         columns = ('ID', 'Name', 'Username', 'Password', 'Express Alloc', 'Junior Alloc', 'Regular Alloc', 'Student Alloc', 'PWD Alloc', 'Senior Alloc', 'Month Sales')
         style = ttk.Style()
+        style.theme_use('clam')
         style.configure('Treeview', font=('Segoe UI', 11), rowheight=32, background='#FFFFFF', fieldbackground='#FFFFFF', borderwidth=0)
         style.configure('Treeview.Heading', font=('Segoe UI', 11, 'bold'), background='#E0E0E0', foreground='#9A4E62', borderwidth=0)
         style.layout('Treeview', [('Treeview.treearea', {'sticky': 'nswe'})])
-        self.emp_tree = ttk.Treeview(table_frame, columns=columns, show='headings', style='Treeview')
+        self.emp_tree = ttk.Treeview(
+            table_card, columns=columns, show='headings', style='Treeview',
+            yscrollcommand=yscroll.set, xscrollcommand=xscroll.set
+        )
+        self.emp_tree.grid(row=0, column=0, sticky='nsew')
+        yscroll.configure(command=self.emp_tree.yview)
+        xscroll.configure(command=self.emp_tree.xview)
         self.emp_tree.heading('ID', text='Employee ID')
-        self.emp_tree.column('ID', width=120, anchor='center')
+        self.emp_tree.column('ID', width=120, anchor='w')
         self.emp_tree.heading('Name', text='Name')
         self.emp_tree.column('Name', width=160, anchor='w')
         self.emp_tree.heading('Username', text='Username')
@@ -596,63 +632,125 @@ class AdminDashboard:
         self.emp_tree.column('Password', width=140, anchor='w')
         alloc_columns = [ ('Express Alloc', 'Express Pass'), ('Junior Alloc', 'Junior Pass'), ('Regular Alloc', 'Regular Pass'), ('Student Alloc', 'Student Pass'), ('PWD Alloc', 'PWD Pass'), ('Senior Alloc', 'Senior C Pass') ]
         self.emp_tree.heading('Month Sales', text='Month Sales')
-        self.emp_tree.column('Month Sales', width=140, anchor='e')
+        self.emp_tree.column('Month Sales', width=140, anchor='center')
         for col, header in alloc_columns:
             self.emp_tree.heading(col, text=header)
             self.emp_tree.column(col, width=110, anchor='center')
-        self.emp_tree.pack(fill=tk.BOTH, expand=True, pady=0)
         def clear_selection_on_click(event):
             region = self.emp_tree.identify("region", event.x, event.y)
             if region == "nothing":
                 self.emp_tree.selection_remove(self.emp_tree.selection())
         self.emp_tree.bind("<Button-1>", clear_selection_on_click, add="+")
-        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.emp_tree.yview)
-        self.emp_tree.configure(yscrollcommand=scrollbar.set)
-        self.emp_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.load_employees()
 
     def show_customers(self):
+        import customtkinter as ctk
         self.clear_content()
         self.set_active_sidebar('👥  Customers')
-        card_frame = self.create_main_content_frame()
-        # Title and subtitle with themed background and padding
-        customer_title = tk.Label(card_frame, text="Customers", font=('Arial', 20, 'bold'), bg='#F0E7D9', anchor='w')
-        customer_title.pack(pady=(20, 0), padx=30, anchor='w')
-        customer_subtitle = tk.Label(card_frame, text="View All Customers and Ticket Sales", font=('Arial', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
-        customer_subtitle.pack(pady=(0, 10), padx=30, anchor='w')
-        # Controls frame with themed background
-        controls_frame = tk.Frame(card_frame, bg='#F0E7D9')
-        controls_frame.pack(fill=tk.X, pady=10)
-        # Search/sort bar with maroon background
-        search_sort_frame = tk.Frame(controls_frame, bg='#9A4E62')
-        search_sort_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Search label (white background for contrast)
-        tk.Label(search_sort_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
-        self.search_var = tk.StringVar()
+
+        # --- Main Card Container ---
+        card_frame = ctk.CTkFrame(self.content_frame, fg_color="#FFFFFF", corner_radius=0)
+        card_frame.pack(fill="both", expand=True, padx=30, pady=30)
+
+        # --- Header Block ---
+        header_row = ctk.CTkFrame(card_frame, fg_color="#FFFFFF")
+        header_row.pack(fill="x", pady=(10, 0), anchor="w")
+        header_row.grid_columnconfigure(0, weight=1)
+        cust_title = ctk.CTkLabel(header_row, text="Customers", font=("Segoe UI", 22, "bold"), text_color="#22223B")
+        cust_title.grid(row=0, column=0, padx=15, sticky="w")
+        cust_subtitle = ctk.CTkLabel(header_row, text="View All Customers and Ticket Sales", font=("Segoe UI", 15), text_color="#6b7280")
+        cust_subtitle.grid(row=1, column=0, padx=15, pady=10, sticky="w")
+
+        # --- Controls Bar ---
+        controls_bar = ctk.CTkFrame(card_frame, fg_color="#F0E7D9", corner_radius=0, height=50)
+        controls_bar.pack(fill="x", padx=10, pady=(0, 15))
+        controls_bar.grid_columnconfigure(0, weight=1)
+        controls_bar.grid_columnconfigure(1, weight=0)
+        controls_bar.grid_columnconfigure(2, weight=0)
+
+        # Search Entry
+        self.search_var = ctk.StringVar()
         self.search_var.trace('w', self.search_customers)
-        search_entry = tk.Entry(search_sort_frame, textvariable=self.search_var, font=('Arial', 11), width=40)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(search_sort_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(search_sort_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)"])
-        sort_options.pack(side=tk.LEFT, padx=5)
+        search_entry = ctk.CTkEntry(
+            controls_bar,
+            textvariable=self.search_var,
+            placeholder_text="Search customer...",
+            text_color="#3f3f3f",
+            placeholder_text_color="#969696",
+            width=220,
+            height=36,
+            font=("Segoe UI", 12),
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
+        )
+        search_entry.grid(row=0, column=0, padx=(16, 8), pady=10, sticky="w")
+
+        # Sort Combobox (all columns)
+        sort_options_list = [
+            ("Ticket ID (A-Z)", 0, False), ("Ticket ID (Z-A)", 0, True),
+            ("Name (A-Z)", 1, False), ("Name (Z-A)", 1, True),
+            ("Email (A-Z)", 2, False), ("Email (Z-A)", 2, True),
+            ("Pass Type (A-Z)", 3, False), ("Pass Type (Z-A)", 3, True),
+            ("Quantity (Lowest)", 4, False), ("Quantity (Highest)", 4, True),
+            ("Amount (Lowest)", 5, False), ("Amount (Highest)", 5, True),
+            ("Booked Date (Newest)", 6, True), ("Booked Date (Oldest)", 6, False),
+            ("Purchased Date (Newest)", 7, True), ("Purchased Date (Oldest)", 7, False),
+            ("Employee (A-Z)", 8, False), ("Employee (Z-A)", 8, True)
+        ]
+        sort_options = ctk.CTkComboBox(
+            controls_bar,
+            values=[opt[0] for opt in sort_options_list],
+            width=200,
+            font=("Segoe UI", 12),
+            dropdown_font=("Segoe UI", 12),
+            state="readonly",
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
+        )
         sort_options.set("Name (A-Z)")
-        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_customers(sort_options.get()))
-        buttons_frame = tk.Frame(controls_frame, bg='white')
-        buttons_frame.pack(side=tk.RIGHT, padx=10)
-        delete_btn = tk.Button(buttons_frame, text="Delete", command=self.delete_customer, bg='#f44336', fg='white')
-        delete_btn.pack(side=tk.LEFT, padx=5)
-        tree_frame = tk.Frame(card_frame, bg='white')
-        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        sort_options.grid(row=0, column=1, padx=(0, 8), pady=10)
+        sort_options.configure(command=lambda value: self.sort_customers(value))
+        self._customer_sort_options = sort_options_list
+
+        # Delete Button
+        delete_btn = ctk.CTkButton(
+            controls_bar, text="Delete", width=90, height=36, fg_color="#E0E0E0", text_color="#f44336", hover_color="#FFCDD2",
+            font=("Segoe UI", 12, "bold"), corner_radius=10, command=self.delete_customer
+        )
+        delete_btn.grid(row=0, column=2, padx=(0, 12), pady=10)
+
+        # --- Table Frame (with scrollbars) ---
+        table_card = ctk.CTkFrame(card_frame, fg_color="#fff", corner_radius=18)
+        table_card.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        table_card.grid_rowconfigure(0, weight=1)
+        table_card.grid_columnconfigure(0, weight=1)
+
+        # Scrollbars
+        yscroll = ctk.CTkScrollbar(table_card, orientation="vertical")
+        xscroll = ctk.CTkScrollbar(table_card, orientation="horizontal")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+
+        # Table (ttk.Treeview inside CTkFrame)
+        import tkinter.ttk as ttk
         columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Employee')
-        self.customers_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('Treeview', font=('Segoe UI', 11), rowheight=32, background='#FFFFFF', fieldbackground='#FFFFFF', borderwidth=0)
+        style.configure('Treeview.Heading', font=('Segoe UI', 11, 'bold'), background='#E0E0E0', foreground='#9A4E62', borderwidth=0)
+        style.layout('Treeview', [('Treeview.treearea', {'sticky': 'nswe'})])
+        self.customers_tree = ttk.Treeview(
+            table_card, columns=columns, show='headings', style='Treeview',
+            yscrollcommand=yscroll.set, xscrollcommand=xscroll.set
+        )
+        self.customers_tree.grid(row=0, column=0, sticky='nsew')
+        yscroll.configure(command=self.customers_tree.yview)
+        xscroll.configure(command=self.customers_tree.xview)
         for col in columns:
             self.customers_tree.heading(col, text=col)
             self.customers_tree.column(col, width=120)
-        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.customers_tree.yview)
-        self.customers_tree.configure(yscrollcommand=scrollbar.set)
-        self.customers_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         def clear_selection_on_click(event):
             region = self.customers_tree.identify("region", event.x, event.y)
             if region == "nothing":
@@ -661,46 +759,119 @@ class AdminDashboard:
         self.load_customers_data()
 
     def show_cancellations(self):
+        import customtkinter as ctk
         self.clear_content()
         self.set_active_sidebar('❌  Cancellations & Refunds')
-        # Create the main content card (rounded, modern look)
-        card_frame = self.create_main_content_frame()
-        # Title: Cancellations and Refunds, styled to match the app (font size 20, bold)
-        cancel_title = tk.Label(card_frame, text="Cancellations and Refunds", font=('Arial', 20, 'bold'), bg='#F0E7D9', anchor='w')
-        cancel_title.pack(pady=(20, 0), padx=30, anchor='w')
-        # Subtitle: View and Manage Customers Submitted Refund Requests, font size 15, gray
-        cancel_subtitle = tk.Label(card_frame, text="View and Manage Customers Submitted Refund Requests", font=('Arial', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
-        cancel_subtitle.pack(pady=(0, 15), padx=30, anchor='w')
-        # Controls frame for search, sort, and action buttons
-        controls_frame = tk.Frame(card_frame, bg='white')
-        controls_frame.pack(fill=tk.X, pady=10)
-        # Search bar and sort dropdown (left side)
-        search_frame = tk.Frame(controls_frame, bg='white')
-        search_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Label(search_frame, text="Search:", bg='white').pack(side=tk.LEFT, padx=5)
-        self.cancel_search_var = tk.StringVar()
+
+        # --- Main Card Container ---
+        card_frame = ctk.CTkFrame(self.content_frame, fg_color="#FFFFFF", corner_radius=0)
+        card_frame.pack(fill="both", expand=True, padx=30, pady=30)
+
+        # --- Header Block ---
+        header_row = ctk.CTkFrame(card_frame, fg_color="#FFFFFF")
+        header_row.pack(fill="x", pady=(10, 0), anchor="w")
+        header_row.grid_columnconfigure(0, weight=1)
+        cancel_title = ctk.CTkLabel(header_row, text="Cancellations and Refunds", font=("Segoe UI", 22, "bold"), text_color="#22223B")
+        cancel_title.grid(row=0, column=0, padx=15, sticky="w")
+        cancel_subtitle = ctk.CTkLabel(header_row, text="View and Manage Customers Submitted Refund Requests", font=("Segoe UI", 15), text_color="#6b7280")
+        cancel_subtitle.grid(row=1, column=0, padx=15, pady=10, sticky="w")
+
+        # --- Controls Bar ---
+        controls_bar = ctk.CTkFrame(card_frame, fg_color="#F0E7D9", corner_radius=0, height=50)
+        controls_bar.pack(fill="x", padx=10, pady=(0, 15))
+        controls_bar.grid_columnconfigure(0, weight=1)
+        controls_bar.grid_columnconfigure(1, weight=0)
+        controls_bar.grid_columnconfigure(2, weight=0)
+        controls_bar.grid_columnconfigure(3, weight=0)
+
+        # Search Entry
+        self.cancel_search_var = ctk.StringVar()
         self.cancel_search_var.trace('w', self.search_cancellations)
-        search_entry = tk.Entry(search_frame, textvariable=self.cancel_search_var, font=('Arial', 11), width=30)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        tk.Label(search_frame, text="Sort by:", bg='white').pack(side=tk.LEFT, padx=5)
-        sort_options = ttk.Combobox(search_frame, values=["Name (A-Z)", "Name (Z-A)", "Date (Newest)", "Date (Oldest)", "Status (A-Z)", "Status (Z-A)"])
-        sort_options.pack(side=tk.LEFT, padx=5)
+        search_entry = ctk.CTkEntry(
+            controls_bar,
+            textvariable=self.cancel_search_var,
+            placeholder_text="Search cancellation...",
+            placeholder_text_color="#969696",
+            text_color="#3f3f3f",
+            width=220,
+            height=36,
+            font=("Segoe UI", 12),
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
+        )
+        search_entry.grid(row=0, column=0, padx=(16, 8), pady=10, sticky="w")
+
+        # Sort Combobox (all columns)
+        cancel_sort_options_list = [
+            ("Ticket ID (A-Z)", 0, False), ("Ticket ID (Z-A)", 0, True),
+            ("Name (A-Z)", 1, False), ("Name (Z-A)", 1, True),
+            ("Email (A-Z)", 2, False), ("Email (Z-A)", 2, True),
+            ("Pass Type (A-Z)", 3, False), ("Pass Type (Z-A)", 3, True),
+            ("Reason (A-Z)", 4, False), ("Reason (Z-A)", 4, True),
+            ("Quantity (Lowest)", 5, False), ("Quantity (Highest)", 5, True),
+            ("Amount (Lowest)", 6, False), ("Amount (Highest)", 6, True),
+            ("Booked Date (Newest)", 7, True), ("Booked Date (Oldest)", 7, False),
+            ("Purchased Date (Newest)", 8, True), ("Purchased Date (Oldest)", 8, False),
+            ("Status (A-Z)", 9, False), ("Status (Z-A)", 9, True)
+        ]
+        sort_options = ctk.CTkComboBox(
+            controls_bar,
+            values=[opt[0] for opt in cancel_sort_options_list],
+            width=200,
+            font=("Segoe UI", 12),
+            dropdown_font=("Segoe UI", 12),
+            state="readonly",
+            fg_color="#fff",
+            border_color="#cccccc",
+            border_width=2
+        )
         sort_options.set("Name (A-Z)")
-        sort_options.bind('<<ComboboxSelected>>', lambda e: self.sort_cancellations(sort_options.get()))
-        # Action buttons (right side)
-        buttons_frame = tk.Frame(controls_frame, bg='white')
-        buttons_frame.pack(side=tk.RIGHT, padx=10)
-        edit_btn = tk.Button(buttons_frame, text="Edit Status", command=self.edit_cancellation_status, bg='#4CAF50', fg='white')
-        edit_btn.pack(side=tk.LEFT, padx=5)
-        delete_btn = tk.Button(buttons_frame, text="Delete", command=self.delete_cancellation, bg='#f44336', fg='white')
-        delete_btn.pack(side=tk.LEFT, padx=5)
-        # Table frame for cancellations/refunds
-        tree_frame = tk.Frame(card_frame, bg='white')
-        tree_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        # Define columns for the table
+        sort_options.grid(row=0, column=1, padx=(0, 8), pady=10)
+        sort_options.configure(command=lambda value: self.sort_cancellations(value)) # Set the command to sort cancellations
+        self._cancel_sort_options = cancel_sort_options_list
+
+        # Edit Status Button
+        edit_btn = ctk.CTkButton(
+            controls_bar, text="Edit Status", width=110, height=36, fg_color="#E0E0E0", text_color="#4CAF50", hover_color="#C8E6C9",
+            font=("Segoe UI", 12, "bold"), corner_radius=10, command=self.edit_cancellation_status
+        )
+        edit_btn.grid(row=0, column=2, padx=(0, 8), pady=10)
+
+        # Delete Button
+        delete_btn = ctk.CTkButton(
+            controls_bar, text="Delete", width=90, height=36, fg_color="#E0E0E0", text_color="#f44336", hover_color="#FFCDD2",
+            font=("Segoe UI", 12, "bold"), corner_radius=10, command=self.delete_cancellation
+        )
+        delete_btn.grid(row=0, column=3, padx=(0, 12), pady=10)
+
+        # --- Table Frame (with scrollbars) ---
+        table_card = ctk.CTkFrame(card_frame, fg_color="#fff", corner_radius=18)
+        table_card.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        table_card.grid_rowconfigure(0, weight=1)
+        table_card.grid_columnconfigure(0, weight=1)
+
+        # Scrollbars
+        yscroll = ctk.CTkScrollbar(table_card, orientation="vertical")
+        xscroll = ctk.CTkScrollbar(table_card, orientation="horizontal")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+
+        # Table (ttk.Treeview inside CTkFrame)
+        import tkinter.ttk as ttk
         columns = ('Ticket ID', 'Name', 'Email', 'Pass Type', 'Reason', 'Quantity', 'Amount', 'Booked Date', 'Purchased Date', 'Status')
-        self.cancellations_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        # Set column widths for better readability
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('Treeview', font=('Segoe UI', 11), rowheight=32, background='#FFFFFF', fieldbackground='#FFFFFF', borderwidth=0)
+        style.configure('Treeview.Heading', font=('Segoe UI', 11, 'bold'), background='#E0E0E0', foreground='#9A4E62', borderwidth=0)
+        style.layout('Treeview', [('Treeview.treearea', {'sticky': 'nswe'})])
+        self.cancellations_tree = ttk.Treeview(
+            table_card, columns=columns, show='headings', style='Treeview',
+            yscrollcommand=yscroll.set, xscrollcommand=xscroll.set
+        )
+        self.cancellations_tree.grid(row=0, column=0, sticky='nsew')
+        yscroll.configure(command=self.cancellations_tree.yview)
+        xscroll.configure(command=self.cancellations_tree.xview)
         column_widths = {
             'Ticket ID': 100,
             'Name': 150,
@@ -717,88 +888,91 @@ class AdminDashboard:
             self.cancellations_tree.heading(col, text=col)
             width = column_widths.get(col, 120)
             self.cancellations_tree.column(col, width=width, anchor='w')
-        # Add vertical scrollbar to the table
-        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.cancellations_tree.yview)
-        self.cancellations_tree.configure(yscrollcommand=scrollbar.set)
-        self.cancellations_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        # Clear selection if user clicks on empty space in the table
         def clear_selection_on_click(event):
             region = self.cancellations_tree.identify("region", event.x, event.y)
             if region == "nothing":
                 self.cancellations_tree.selection_remove(self.cancellations_tree.selection())
         self.cancellations_tree.bind("<Button-1>", clear_selection_on_click, add="+")
-        # Load the data from the database into the table
         self.load_cancellations_data()
 
     def show_pricing(self):
         self.clear_content()
-        self.set_active_sidebar('💳  Pricing')
-        # Create the main content card (rounded, modern look)
-        card_frame = self.create_main_content_frame()
-        # Title: Pass Type Pricing, styled to match the app (font size 20, bold)
-        pricing_title = tk.Label(card_frame, text="Pass Type Pricing", font=('Arial', 20, 'bold'), bg='#F0E7D9', anchor='w')
-        pricing_title.pack(pady=(20, 0), padx=30, anchor='w')
-        # Label for showing price update status/messages
-        self.price_update_label = tk.Label(card_frame, text="", font=('Arial', 10), fg='#4CAF50', bg='#F0E7D9', anchor='w')
+        
+        # Add pass type pricing title and subtitle
+        pricing_title = tk.Label(self.content_frame, text="Pass Type Pricing", font=('Arial', 16, 'bold'), bg='white', anchor='w')
+        pricing_title.pack(pady=(10, 0), padx=20, anchor='w')
+        
+        self.price_update_label = tk.Label(self.content_frame, text="", font=('Arial', 10), fg='#4CAF50', bg='white', anchor='w')
         self.price_update_label.pack(pady=(5, 0), padx=20, anchor='w')
-        # Subtitle: View and Manage Ticketing Pricing, font size 15, gray
-        pricing_subtitle = tk.Label(card_frame, text="View and Manage Ticketing Pricing", font=('Arial', 15), fg='#6b7280', bg='#F0E7D9', anchor='w')
-        pricing_subtitle.pack(pady=(0, 15), padx=30, anchor='w')
+        
+        pricing_subtitle = tk.Label(self.content_frame, text="View and Manage Ticketing Pricing", font=('Arial', 12), fg='#6b7280', bg='white', anchor='w')
+        pricing_subtitle.pack(pady=(0, 10), padx=20, anchor='w')
 
-        # Rounded card for pricing table
-        card_w, card_h, card_r = 800, 400, 35  # Card size and radius
-        pricing_card_canvas = tk.Canvas(card_frame, width=card_w, height=card_h, bg='#F0E7D9', highlightthickness=0)
-        pricing_card_canvas.pack(padx=0, pady=0)
-        # Draw the rounded rectangle for the card background
-        draw_rounded_rect(pricing_card_canvas, 0, 0, card_w, card_h, card_r, fill='white', outline='')
-        # Frame inside the card for the pricing table
-        pricing_inner = tk.Frame(pricing_card_canvas, bg='white')
-        pricing_card_canvas.create_window((card_w//2, card_h//2), window=pricing_inner, anchor='center', width=card_w-30, height=card_h-30)
+        # Create main frame for pricing
+        main_frame = tk.Frame(self.content_frame, bg='white')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
 
-        # Load pricing data from the database
+        # Get current prices from database
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM pricing')
         prices = cursor.fetchall()
         conn.close()
+
+        # Store entry widgets
         self.price_entries = {}
+
+        # Create price editing interface
         for pass_type, current_price in prices:
-            # Row for each pass type
-            row = tk.Frame(pricing_inner, bg='white', name=f"price_row_{pass_type.replace(' ', '_').lower()}")
-            row.pack(fill=tk.X, pady=10, padx=30)
-            # Pass type label
-            label = tk.Label(row, text=pass_type, font=('Arial', 12), bg='white', width=20, anchor='w')
+            # Create frame for each row
+            row = tk.Frame(main_frame, bg='white', name=f"price_row_{pass_type.replace(' ', '_').lower()}")
+            row.pack(fill=tk.X, pady=10)
+
+            # Create pass type label (left-aligned)
+            label = tk.Label(row, text=pass_type, font=('Arial', 12), bg='white',
+                           width=20, anchor='w')
             label.pack(side=tk.LEFT, padx=(20, 10))
-            # Frame for price entry and currency
+
+            # Create price entry with currency symbol
             price_frame = tk.Frame(row, bg='white')
             price_frame.pack(side=tk.LEFT)
-            # Peso sign label
+
             currency_label = tk.Label(price_frame, text="₱", font=('Arial', 12), bg='white')
             currency_label.pack(side=tk.LEFT, padx=(0, 5))
-            # StringVar for price entry
+
+            # Create StringVar with initial formatted price
             price_var = tk.StringVar(value=f"{float(current_price):.2f}")
-            # Validation for price input (only allow valid numbers)
+            
+            # Add validation to only allow numbers and decimal point
             def validate_price(action, value_if_allowed):
-                if action == '1':
+                if action == '1':  # Insert
                     if value_if_allowed == "":
                         return True
                     try:
+                        # Remove commas for validation
                         cleaned_value = value_if_allowed.replace(',', '')
+                        # Allow numbers, single decimal point, and optional negative sign
                         if cleaned_value.count('.') <= 1 and cleaned_value.replace('.', '').replace('-', '', 1).isdigit():
+                            # Don't allow just a decimal point or negative sign
                             if cleaned_value not in ['.', '-']:
                                 return True
                     except ValueError:
                         pass
                     return False
                 return True
-            # Entry widget for price (editable)
-            entry = tk.Entry(price_frame, textvariable=price_var, font=('Arial', 12), width=10, justify='right', name=f"price_entry_{pass_type.replace(' ', '_').lower()}")
+
+            entry = tk.Entry(price_frame, textvariable=price_var, 
+                           font=('Arial', 12), width=10,
+                           justify='right',
+                           name=f"price_entry_{pass_type.replace(' ', '_').lower()}")
             entry.pack(side=tk.LEFT)
+            
             self.price_entries[pass_type] = price_var
+            
             vcmd = (entry.register(validate_price), '%d', '%P')
             entry.configure(validate="key", validatecommand=vcmd)
-            # Highlight entry in red if invalid input
+
+            # Add immediate feedback on invalid input
             def on_invalid_input(event):
                 widget = event.widget
                 if widget.get():
@@ -807,18 +981,30 @@ class AdminDashboard:
                         widget.config(fg='black')
                     except ValueError:
                         widget.config(fg='red')
+            
             entry.bind('<KeyRelease>', on_invalid_input)
 
-        # Frame for Save and Reset buttons
-        btn_frame = tk.Frame(card_frame, bg='#F0E7D9')
+        # Create buttons frame
+        btn_frame = tk.Frame(self.content_frame, bg='white')
         btn_frame.pack(pady=20)
-        # Save Changes button (green)
-        save_btn = tk.Button(btn_frame, text="Save Changes", command=self.save_prices, bg='#4CAF50', fg='white', font=('Arial', 11, 'bold'), width=15, height=2)
+
+        # Create save button
+        save_btn = tk.Button(btn_frame, text="Save Changes", 
+                           command=self.save_prices,
+                           bg='#4CAF50', fg='white', 
+                           font=('Arial', 11, 'bold'),
+                           width=15, height=2)
         save_btn.pack(side=tk.LEFT, padx=10)
-        # Reset button (red)
-        reset_btn = tk.Button(btn_frame, text="Reset", command=self.reset_prices, bg='#f44336', fg='white', font=('Arial', 11, 'bold'), width=15, height=2)
+
+        # Create reset button
+        reset_btn = tk.Button(btn_frame, text="Reset", 
+                            command=self.reset_prices,
+                            bg='#f44336', fg='white', 
+                            font=('Arial', 11, 'bold'),
+                            width=15, height=2)
         reset_btn.pack(side=tk.LEFT, padx=10)
-        # Show last updated time
+
+        # Show last update time
         self.price_update_label.config(text=f"Last updated: {time.strftime('%m/%d/%Y %H:%M:%S')}")
 
     def save_prices(self):
@@ -943,26 +1129,23 @@ class AdminDashboard:
                 self.emp_tree.insert('', tk.END, values=employee)
 
     def sort_employees(self, sort_option):
-        # to get all items
         items = []
         for item in self.emp_tree.get_children():
             values = self.emp_tree.item(item)['values']
             items.append(values)
-
-        # to sort based on selected option
-        if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1])  # to sort by name ascending
-        elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1], reverse=True)  # to sort by name descending
-        elif sort_option == "Username (A-Z)":
-            items.sort(key=lambda x: x[2])  # to sort by username ascending
-        elif sort_option == "Username (Z-A)":
-            items.sort(key=lambda x: x[2], reverse=True)  # to sort by username descending
-
-        # to clear and reload table
+        # Find the sort index and reverse from the options
+        for label, idx, reverse in self._emp_sort_options:
+            if label == sort_option:
+                # Special handling for numeric columns
+                if idx in [4,5,6,7,8,9]:  # Allocations
+                    items.sort(key=lambda x: int(x[idx]), reverse=reverse)
+                elif idx == 10:  # Month Sales (currency string)
+                    items.sort(key=lambda x: float(str(x[idx]).replace('₱','').replace(',','')), reverse=reverse)
+                else:
+                    items.sort(key=lambda x: str(x[idx]), reverse=reverse)
+                break
         for item in self.emp_tree.get_children():
             self.emp_tree.delete(item)
-        
         for item in items:
             self.emp_tree.insert('', tk.END, values=item)
 
@@ -1023,14 +1206,23 @@ class AdminDashboard:
         for item in self.customers_tree.get_children():
             values = self.customers_tree.item(item)['values']
             items.append(values)
-        if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1])
-        elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1], reverse=True)
-        elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[7], reverse=True)
-        elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[7])
+        for label, idx, reverse in self._customer_sort_options:
+            if label == sort_option:
+            # Quantity, Amount
+                if idx in [4, 5]:
+                    items.sort(key=lambda x: float(str(x[idx]).replace('₱','').replace(',','')), reverse=reverse)
+            # Booked Date, Purchased Date
+                elif idx in [6, 7]:
+                    from datetime import datetime
+                    def parse_date(val):
+                        try:
+                            return datetime.strptime(val, '%m/%d/%Y')
+                        except Exception:
+                            return datetime.min
+                    items.sort(key=lambda x: parse_date(x[idx]), reverse=reverse)
+                else:
+                    items.sort(key=lambda x: str(x[idx]).lower(), reverse=reverse)
+                break
         for item in self.customers_tree.get_children():
             self.customers_tree.delete(item)
         for item in items:
@@ -1079,6 +1271,7 @@ class AdminDashboard:
 
         # to create new status selection
         tk.Label(edit_frame, text="New Status:", font=('Arial', 11, 'bold'), 
+        
         bg='white').pack(pady=10)
         status_var = tk.StringVar(value=current_values[9])
         status_combo = ttk.Combobox(edit_frame, textvariable=status_var,
@@ -1088,14 +1281,23 @@ class AdminDashboard:
         def save_status():
             new_status = status_var.get()
             if new_status != current_values[9]:
-                # Update database
+        # Update database
                 conn = sqlite3.connect('funpass.db')
                 cursor = conn.cursor()
                 cursor.execute('UPDATE cancellations SET status = ? WHERE ticket_id = ?',
-                        (new_status, current_values[0]))
+                    (new_status, current_values[0]))
                 conn.commit()
                 conn.close()
 
+        # --- SEND EMAIL IF APPROVED OR REJECTED ---
+                if new_status in ["Approved", "Rejected"]:
+                    to_email = current_values[2]
+                    name = current_values[1]
+                    ticket_id = current_values[0]
+                    if to_email:
+                        self.send_cancellation_status_email(to_email, name, ticket_id, new_status)
+
+        # Refresh all relevant tables and dashboard
                 # Refresh all relevant tables and dashboard
                 if hasattr(self, 'cancellations_tree') and self.cancellations_tree.winfo_exists():
                     self.load_cancellations_data()
@@ -1165,18 +1367,23 @@ class AdminDashboard:
         for item in self.cancellations_tree.get_children():
             values = self.cancellations_tree.item(item)['values']
             items.append(values)
-        if sort_option == "Name (A-Z)":
-            items.sort(key=lambda x: x[1])
-        elif sort_option == "Name (Z-A)":
-            items.sort(key=lambda x: x[1], reverse=True)
-        elif sort_option == "Date (Newest)":
-            items.sort(key=lambda x: x[8], reverse=True)
-        elif sort_option == "Date (Oldest)":
-            items.sort(key=lambda x: x[8])
-        elif sort_option == "Status (A-Z)":
-            items.sort(key=lambda x: x[9])
-        elif sort_option == "Status (Z-A)":
-            items.sort(key=lambda x: x[9], reverse=True)
+        for label, idx, reverse in self._cancel_sort_options:
+            if label == sort_option:
+            # Quantity, Amount
+                if idx in [5, 6]:
+                    items.sort(key=lambda x: float(str(x[idx]).replace('₱','').replace(',','')), reverse=reverse)
+            # Booked Date, Purchased Date
+                elif idx in [7, 8]:
+                    from datetime import datetime
+                    def parse_date(val):
+                        try:
+                            return datetime.strptime(val, '%m/%d/%Y')
+                        except Exception:
+                            return datetime.min
+                    items.sort(key=lambda x: parse_date(x[idx]), reverse=reverse)
+                else:
+                    items.sort(key=lambda x: str(x[idx]).lower(), reverse=reverse)
+                break
         for item in self.cancellations_tree.get_children():
             self.cancellations_tree.delete(item)
         for item in items:
@@ -1187,10 +1394,11 @@ class AdminDashboard:
             self.cancellations_tree.delete(item)
         conn = sqlite3.connect('funpass.db')
         cursor = conn.cursor()
-        cursor.execute('''            SELECT ticket_id, name, email, pass_type, reasons, quantity, amount,
-                strftime('%m/%d/%Y', booked_date) as booked_date, 
-                strftime('%m/%d/%Y', purchased_date) as purchased_date,
-                status
+        cursor.execute('''
+            SELECT ticket_id, name, email, pass_type, reasons, quantity, amount,
+                   strftime('%m/%d/%Y', booked_date) as booked_date,
+                   strftime('%m/%d/%Y', purchased_date) as purchased_date,
+                   status
             FROM cancellations
             ORDER BY id DESC
         ''')
@@ -1265,7 +1473,7 @@ class AdminDashboard:
 
             # Create list of values for treeview
             emp_list = list(emp)
-            emp_list.append(f"₱{net_monthly_sales:,.2f}")  # Add monthly sales at the end
+            emp_list.append(f"₱{net_monthly_sales:,.2f}")  # Add monthly sales 
 
             # Insert into treeview
             self.emp_tree.insert('', tk.END, values=emp_list)
@@ -1304,9 +1512,11 @@ class AdminDashboard:
         for label_text, field_name in basic_fields:
             field_frame = tk.Frame(basic_frame, bg='white')
             field_frame.pack(fill=tk.X, pady=5)
-            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
+            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='w')
             label.pack(side=tk.LEFT, padx=(0, 10))
             entry = tk.Entry(field_frame, font=('Arial', 11), width=30)
+           
+
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             basic_entries[field_name] = entry
 
@@ -1328,7 +1538,7 @@ class AdminDashboard:
         for label_text, field_name in alloc_fields:
             field_frame = tk.Frame(alloc_frame, bg='white')
             field_frame.pack(fill=tk.X, pady=5)
-            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='e')
+            label = tk.Label(field_frame, text=label_text, bg='white', font=('Arial', 11), width=12, anchor='w')
             label.pack(side=tk.LEFT, padx=(0, 10))
 
             # Create spinbox for ticket quantity with default value 0 and hint behavior
@@ -1482,6 +1692,54 @@ class AdminDashboard:
         canvas.bind("<Button-1>", lambda e: command())
         canvas.config(cursor='hand2')
         return canvas
+
+    import smtplib
+    from email.message import EmailMessage
+
+    def send_cancellation_status_email(self, to_email, name, ticket_id, status):
+        SMTP_SERVER = 'smtp.gmail.com'
+        SMTP_PORT = 587
+        SMTP_USER = 'funpasstothemagicalpark@gmail.com'
+        SMTP_PASS = 'qauf qaub sexo hefs'
+
+        subject = f"FunPass Cancellation Request Update (Ticket ID: {ticket_id})"
+        if status == "Approved":
+            body = f"""\
+Hello {name},
+
+Your cancellation request for Ticket ID {ticket_id} has been APPROVED.
+
+You will receive your refund soon. Thank you for using FunPass!
+
+FunPass Amusement Park
+"""
+        elif status == "Rejected":
+            body = f"""\
+Hello {name},
+
+Your cancellation request for Ticket ID {ticket_id} has been REJECTED.
+
+If you have questions, please contact our support.
+
+FunPass Amusement Park
+"""
+        else:
+            return  # Only send for Approved or Rejected
+
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = SMTP_USER
+        msg['To'] = to_email
+        msg.set_content(body)
+
+        try:
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASS)
+                server.send_message(msg)
+            print(f"Status update email sent to {to_email}")
+        except Exception as e:
+            print(f"Failed to send status update email: {e}")
 
 if __name__ == "__main__":
     create_database()  # to initialize the database

@@ -77,14 +77,17 @@ def create_rounded_button(parent, text, command, width=200, height=40, radius=15
 def show_login():
     root = tk.Tk()  # Create main window
     root.title("FunPass - Login")
-    center_window(root, 800, 600)  # Center the window
+    # Set the window to full screen using geometry
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.geometry(f"{screen_width}x{screen_height}+0+0")
     resample_filter = get_resample_filter()  # Get best image resample filter
 
     # Try to set a background image
     try:
         image_path = "bg_carousel.jpeg"
         bg_image = Image.open(image_path)
-        bg_image_resized = bg_image.resize((1370, 720), resample_filter)
+        bg_image_resized = bg_image.resize((screen_width, screen_height), resample_filter)
         bg_photo = ImageTk.PhotoImage(bg_image_resized)
         bg_label = tk.Label(root, image=bg_photo)
         bg_label.place(x=0, y=0, relwidth=1, relheight=1)
